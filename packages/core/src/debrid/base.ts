@@ -287,6 +287,11 @@ export interface UsenetDebridService extends BaseDebridService {
   ): Promise<string>;
   removeNzb?(nzbId: string): Promise<void>;
   getNzb?(nzbId: string): Promise<DebridDownload>;
+  preloadNzb?(
+    nzbUrl: string,
+    category: string,
+    expectedFolderName: string
+  ): Promise<void>;
 }
 
 export type DebridService = TorrentDebridService | UsenetDebridService;
