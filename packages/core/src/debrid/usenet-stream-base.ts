@@ -642,8 +642,9 @@ export abstract class UsenetStreamService implements UsenetDebridService {
       // Path does not exist, proceed with preload
     }
 
-    // Track this URL as preloading so resolve can detect concurrent access
-    UsenetStreamService.preloadingUrls.add(nzbUrl);
+    // Track this URL as preloading (scoped per service) so resolve can detect concurrent access
+    const preloadKey = `${this.serviceName}:${nzbUrl}`;
+    UsenetStreamService.preloadingUrls.add(preloadKey);
     try {
       const addResult = await this.api.addUrl(
         nzbUrl,
@@ -657,10 +658,10 @@ export abstract class UsenetStreamService implements UsenetDebridService {
         nzoId: addResult.nzoId,
       });
     } catch (error) {
-      UsenetStreamService.preloadingUrls.delete(nzbUrl);
+      UsenetStreamService.preloadingUrls.delete(preloadKey);
       throw error;
     }
-    // Note: URL stays in preloadingUrls until content appears (cleaned up in resolve)
+    // Note: preloadKey stays in preloadingUrls until content appears (cleaned up in resolve)
   }
 
   private async listWebdavFolders(path: string): Promise<FileStat[]> {
@@ -1007,6 +1008,8 @@ export abstract class UsenetStreamService implements UsenetDebridService {
         contentPath = expectedContentPath;
         jobName = expectedFolderName;
         jobCategory = category;
+        // Clean up preloading tracker if content is ready
+        UsenetStreamService.preloadingUrls.delete(`${this.serviceName}:${nzb}`);
         this.serviceLogger.debug(`Content already exists`, {
           path: expectedContentPath,
         });
@@ -1041,8 +1044,9 @@ export abstract class UsenetStreamService implements UsenetDebridService {
         );
         nzoId = addResult.nzoId;
       } catch (addError) {
-        // Check if this NZB is currently being preloaded
-        if (UsenetStreamService.preloadingUrls.has(nzb)) {
+        // Check if this NZB is currently being preloaded (scoped per service)
+        const preloadKey = `${this.serviceName}:${nzb}`;
+        if (UsenetStreamService.preloadingUrls.has(preloadKey)) {
           // NZB is being preloaded - poll for the content to appear
           this.serviceLogger.debug(
             `addUrl failed but NZB is being preloaded, polling WebDAV for content`,
@@ -1078,7 +1082,7 @@ export abstract class UsenetStreamService implements UsenetDebridService {
           }
 
           // Clean up preloading tracker
-          UsenetStreamService.preloadingUrls.delete(nzb);
+          UsenetStreamService.preloadingUrls.delete(preloadKey);
 
           if (!contentFound) {
             // Timeout - rethrow the original error
