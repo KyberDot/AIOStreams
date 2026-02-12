@@ -859,4 +859,57 @@ export class TorboxDebridService
 
     return playbackLink;
   }
+
+  public async preloadNzb(
+    nzbUrl: string,
+    category: string,
+    expectedFolderName: string
+  ): Promise<void> {
+    // Check if this NZB is already in TorBox's usenet downloads
+    try {
+      const existingDownloads = await this.listNzbs();
+      const alreadyExists = existingDownloads.some(
+        (download) =>
+          download.name === expectedFolderName ||
+          (download.hash && nzbUrl.includes(download.hash))
+      );
+
+      if (alreadyExists) {
+        logger.debug(`NZB already exists in TorBox, skipping preload`, {
+          nzbUrl,
+          expectedFolderName,
+        });
+        return;
+      }
+    } catch (error) {
+      // If we can't check, proceed with preloading anyway
+      logger.debug(
+        `Could not check existing TorBox downloads, proceeding with preload`,
+        {
+          error: error instanceof Error ? error.message : String(error),
+        }
+      );
+    }
+
+    try {
+      await this.addNzb(nzbUrl, expectedFolderName);
+      logger.debug(`Preloaded NZB to TorBox`, {
+        nzbUrl,
+        category,
+        expectedFolderName,
+      });
+    } catch (error) {
+      throw new DebridError(
+        `Failed to preload NZB to TorBox: ${error instanceof Error ? error.message : String(error)}`,
+        {
+          statusCode: 500,
+          statusText: 'Preload failed',
+          code: 'UNKNOWN',
+          headers: {},
+          body: error,
+          type: 'api_error',
+        }
+      );
+    }
+  }
 }

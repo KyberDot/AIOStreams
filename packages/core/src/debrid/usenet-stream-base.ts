@@ -521,7 +521,7 @@ export abstract class UsenetStreamService implements UsenetDebridService {
           statusCode: status,
           statusText: status
             ? error.message.match(/response: \d+ (.*)/)?.[1] ||
-              'Internal Server Error'
+            'Internal Server Error'
             : 'Internal Server Error',
           code: convertStatusCodeToError(status),
           headers: {},
@@ -642,6 +642,27 @@ export abstract class UsenetStreamService implements UsenetDebridService {
       // Path does not exist, proceed with preload
     }
 
+    // Check SABnzbd history for previously failed NZBs with the same name
+    try {
+      const history = await this.api.history({ limit: 500 });
+      const failedSlot = history.slots.find(
+        (slot) =>
+          slot.status === 'failed' && slot.name === expectedFolderName
+      );
+      if (failedSlot) {
+        this.serviceLogger.debug(
+          `NZB previously failed in history, skipping preload`,
+          {
+            expectedFolderName,
+            failMessage: failedSlot.failMessage,
+          }
+        );
+        return;
+      }
+    } catch {
+      // If history check fails, proceed with preload anyway
+    }
+
     // Track this URL as preloading (scoped per service) so resolve can detect concurrent access
     const preloadKey = `${this.serviceName}:${nzbUrl}`;
     UsenetStreamService.preloadingUrls.add(preloadKey);
@@ -679,7 +700,7 @@ export abstract class UsenetStreamService implements UsenetDebridService {
           statusCode: status,
           statusText: status
             ? error.message.match(/response: \d+ (.*)/)?.[1] ||
-              'Internal Server Error'
+            'Internal Server Error'
             : 'Internal Server Error',
           code: convertStatusCodeToError(status),
           headers: {},
