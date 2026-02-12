@@ -268,6 +268,8 @@ export class AIOStreams {
           ['nzbdav', 'altmount'].includes(s.service.id)
       ).length,
     });
+    // Preload NZBs (fire and forget) - sends top X NZBs to usenet stream services
+    // so they start downloading before the user clicks
     if (this.userData.preloadNzb?.enabled && !preCaching) {
       setImmediate(() => {
         this._preloadNzbs(finalStreams, context).catch((error) => {
