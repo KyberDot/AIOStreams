@@ -7,6 +7,7 @@ import {
   Cache,
   DistributedLock,
   getTimeTakenSincePoint,
+  maskSensitiveInfo,
 } from '../utils/index.js';
 import { StremThruService } from './stremthru.js';
 import { selectFileInTorrentOrNZB, hashNzbUrl } from './utils.js';
@@ -876,7 +877,7 @@ export class TorboxDebridService
 
       if (alreadyExists) {
         logger.debug(`NZB already exists in TorBox, skipping preload`, {
-          nzbUrl,
+          nzbUrl: maskSensitiveInfo(nzbUrl),
           expectedFolderName,
         });
         return;
@@ -894,7 +895,7 @@ export class TorboxDebridService
     try {
       await this.addNzb(nzbUrl, expectedFolderName);
       logger.debug(`Preloaded NZB to TorBox`, {
-        nzbUrl,
+        nzbUrl: maskSensitiveInfo(nzbUrl),
         category,
         expectedFolderName,
       });
