@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.25.0](https://github.com/Viren070/AIOStreams/compare/v2.24.5...v2.25.0) (2026-03-01)
+
+
+### Features
+
+* add nzb failover ([03da152](https://github.com/Viren070/AIOStreams/commit/03da15278f854445401030bd208a358f21d172ec)), closes [#578](https://github.com/Viren070/AIOStreams/issues/578)
+* cache debrid errors ([03da152](https://github.com/Viren070/AIOStreams/commit/03da15278f854445401030bd208a358f21d172ec))
+
+
+### Bug Fixes
+
+* **frontend/templates:** ensure sub-options are filtered for visibility ([f4fe357](https://github.com/Viren070/AIOStreams/commit/f4fe3570651a1193e1b05b901b0c06558927e457))
+* **frontend/templates:** expand featured template when clicked ([46ac577](https://github.com/Viren070/AIOStreams/commit/46ac5771e92df7eca87d1ff87517ca53ba8c2136))
+* **frontend:** cast subOptions to Option[] in getVisibleOptions ([1a92201](https://github.com/Viren070/AIOStreams/commit/1a92201f3a1234f42d94fca0db88eceacf9e0342))
+* **frontend:** update mode type ([3d0dcb5](https://github.com/Viren070/AIOStreams/commit/3d0dcb58833372fb9cbfd3a70d5cfe2989affb22))
+* remove length requirement for name and description fields ([4d31e77](https://github.com/Viren070/AIOStreams/commit/4d31e77ccb22d1f65e3c2fdc9717789a4a1bb8cc))
+
 ## [2.24.5](https://github.com/Viren070/AIOStreams/compare/v2.24.4...v2.24.5) (2026-02-28)
 
 
