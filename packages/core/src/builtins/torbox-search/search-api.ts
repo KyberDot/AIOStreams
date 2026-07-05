@@ -173,7 +173,7 @@ class TorboxSearchApi {
 
     if (isErrorResponse(result)) {
       throw new TorboxSearchApiError(
-        result.detail || result.message || result.error || 'Unknown API error',
+        `TorBoxSearchApiError: ${result.detail || result.message || result.error || 'Unknown API error'}`,
         response.status,
         result.error
       );
