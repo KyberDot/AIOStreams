@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryKey,
+} from '@tanstack/react-query';
 import { api } from '@/lib/api';
 
 export type SettingsUiKind =
@@ -43,7 +48,10 @@ export interface SettingsKey {
   ui: SettingsUiHint;
 }
 
-const KEY = ['dashboard', 'settings'] as const;
+/** Query key for the generic settings page. Also the default invalidation
+ *  target for the reset/import mutations below. */
+export const SETTINGS_QUERY_KEY = ['dashboard', 'settings'] as const;
+const KEY = SETTINGS_QUERY_KEY;
 
 export function useSettings() {
   return useQuery({
@@ -73,14 +81,18 @@ export interface ResetResult {
   requiresRestart: boolean;
 }
 
-export function useResetSettings() {
+/**
+ * @param invalidate Query keys to refetch after a successful reset.
+ */
+export function useResetSettings(invalidate: QueryKey[] = [KEY]) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (keys: string[]) =>
       api<ResetResult>('POST /dashboard/settings/reset', {
         body: { keys },
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+    onSuccess: () =>
+      invalidate.forEach((queryKey) => qc.invalidateQueries({ queryKey })),
   });
 }
 
@@ -107,14 +119,18 @@ export interface ImportSettingsResult {
   requiresRestart: boolean;
 }
 
-export function useImportSettings() {
+/**
+ * @param invalidate Query keys to refetch after a successful import.
+ */
+export function useImportSettings(invalidate: QueryKey[] = [KEY]) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (settings: Record<string, unknown>) =>
       api<ImportSettingsResult>('POST /dashboard/settings/import/json', {
         body: { settings },
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+    onSuccess: () =>
+      invalidate.forEach((queryKey) => qc.invalidateQueries({ queryKey })),
   });
 }
 

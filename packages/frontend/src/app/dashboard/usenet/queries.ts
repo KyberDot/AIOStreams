@@ -218,6 +218,10 @@ export interface LibraryEntry {
 
 const ROOT = ['dashboard', 'usenet'] as const;
 
+/** Query key for the usenet engine settings; exported so the settings actions
+ *  menu can invalidate it after a scoped reset/import. */
+export const USENET_SETTINGS_QUERY_KEY = [...ROOT, 'settings'] as const;
+
 export function useUsenetStats(window: UsenetWindow) {
   return useQuery({
     queryKey: [...ROOT, 'stats', window],
@@ -290,7 +294,7 @@ export type UsenetProfiles = Record<string, UsenetProfilePreset>;
 
 export function useUsenetSettings() {
   return useQuery({
-    queryKey: [...ROOT, 'settings'],
+    queryKey: USENET_SETTINGS_QUERY_KEY,
     queryFn: () =>
       api<{ keys: SettingsKey[]; profiles: UsenetProfiles }>(
         '/dashboard/usenet/settings'
@@ -307,7 +311,8 @@ export function useSaveUsenetSettings() {
         'PATCH /dashboard/usenet/settings',
         { body: patch }
       ),
-    onSuccess: () => qc.invalidateQueries({ queryKey: [...ROOT, 'settings'] }),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: USENET_SETTINGS_QUERY_KEY }),
   });
 }
 

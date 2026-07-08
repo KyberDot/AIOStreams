@@ -1,20 +1,26 @@
 import React from 'react';
 import { z } from 'zod';
 import { toast } from 'sonner';
+import { BiCog } from 'react-icons/bi';
 import { useFormContext, useWatch, type UseFormReturn } from 'react-hook-form';
 import { Form } from '@/components/ui/form';
 import { Card } from '@/components/ui/card';
 import { DashboardLoading } from '@/components/shared/dashboard-query-boundary';
-import { SettingsCard } from '../settings/_components/settings-card';
+import {
+  SettingsCard,
+  SettingsPageHeader,
+} from '../settings/_components/settings-card';
 import { SettingsField, toName } from '../settings/_components/settings-field';
 import {
   SettingsSubmitButton,
   SettingsIsDirty,
 } from '../settings/_components/settings-submit-button';
 import type { SettingsKey } from '../settings/queries';
+import { SettingsActionsMenu } from '../settings/_components/settings-actions-menu';
 import {
   useUsenetSettings,
   useSaveUsenetSettings,
+  USENET_SETTINGS_QUERY_KEY,
   type UsenetProfiles,
 } from './queries';
 
@@ -27,6 +33,16 @@ const BUNDLED_LEAVES = [
 const PROFILE_LEAF = 'performanceProfile';
 
 const usenetKey = (leaf: string) => `usenet.${leaf}`;
+
+/** Scope for the settings actions menu: every usenet engine key except the
+ *  provider accounts (managed in their own editor). Mirrors the backend's
+ *  `isManagedUsenetKey` so reset/import/export can never touch providers. */
+const USENET_SCOPE = {
+  includes: (key: string) =>
+    key.startsWith('usenet.') && key !== 'usenet.providers',
+  fileStem: 'aiostreams-usenet-settings',
+  noun: 'usenet',
+} as const;
 
 /**
  * Curated section layout for the usenet engine settings. Keys are grouped by
@@ -213,74 +229,90 @@ export function UsenetSettingsPage() {
   const profileNameKey = toName(usenetKey(PROFILE_LEAF));
 
   return (
-    <Form
-      // Re-key on the loaded values so a refetch after save re-seeds defaults.
-      key={keys.map((k) => `${k.key}:${String(k.value)}`).join('|')}
-      schema={schema}
-      defaultValues={defaults}
-      stackClass="space-y-4 relative"
-      onSubmit={async (data: Record<string, unknown>) => {
-        // When a non-custom profile is active the engine derives the four
-        // bundled values from it, so we don't persist those fields (they'd just
-        // be stale shadows) — only the profile choice itself.
-        const profileActive = data[profileNameKey] !== 'custom';
-        const patch: Record<string, unknown> = {};
-        for (const [n, val] of Object.entries(data)) {
-          const k = byName.get(n);
-          if (!k || k.source === 'environment') continue;
-          if (profileActive && bundledNames.has(n)) continue;
-          const isNullable = k.value === null || k.default === null;
-          const normalised = isNullable && val === '' ? null : val;
-          if (JSON.stringify(normalised) !== JSON.stringify(k.value)) {
-            patch[k.key] = normalised;
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-2">
+        <SettingsPageHeader
+          title="Settings"
+          description="Native NNTP engine configuration"
+          icon={BiCog}
+        />
+        <div className="pt-1">
+          <SettingsActionsMenu
+            sectionKeys={keys}
+            sectionLabel="Usenet"
+            invalidate={[USENET_SETTINGS_QUERY_KEY]}
+            scope={USENET_SCOPE}
+          />
+        </div>
+      </div>
+      <Form
+        // Re-key on the loaded values so a refetch after save re-seeds defaults.
+        key={keys.map((k) => `${k.key}:${String(k.value)}`).join('|')}
+        schema={schema}
+        defaultValues={defaults}
+        stackClass="space-y-4 relative"
+        onSubmit={async (data: Record<string, unknown>) => {
+          const profileActive = data[profileNameKey] !== 'custom';
+          const patch: Record<string, unknown> = {};
+          for (const [n, val] of Object.entries(data)) {
+            const k = byName.get(n);
+            if (!k || k.source === 'environment') continue;
+            if (profileActive && bundledNames.has(n)) continue;
+            const isNullable = k.value === null || k.default === null;
+            const normalised = isNullable && val === '' ? null : val;
+            if (JSON.stringify(normalised) !== JSON.stringify(k.value)) {
+              patch[k.key] = normalised;
+            }
           }
-        }
-        if (Object.keys(patch).length === 0) {
-          toast.info('No changes to save.');
-          methodsRef.current?.reset(data, { keepValues: true });
-          return;
-        }
-        try {
-          const res = await mutateAsync(patch);
-          toast.success(
-            `Saved ${res.updated.length} setting${res.updated.length === 1 ? '' : 's'}.`
+          if (Object.keys(patch).length === 0) {
+            toast.info('No changes to save.');
+            methodsRef.current?.reset(data, { keepValues: true });
+            return;
+          }
+          try {
+            const res = await mutateAsync(patch);
+            toast.success(
+              `Saved ${res.updated.length} setting${res.updated.length === 1 ? '' : 's'}.`
+            );
+            methodsRef.current?.reset(data, { keepValues: true });
+            if (res.requiresRestart)
+              toast.warning('Some changes require a restart to take effect.', {
+                duration: 8000,
+              });
+          } catch (e: any) {
+            const issues = e?.issues as Record<string, string> | undefined;
+            if (issues)
+              for (const [key, msg] of Object.entries(issues))
+                toast.error(`${key}: ${msg}`);
+            else toast.error(e?.message ?? 'Failed to save settings');
+          }
+        }}
+      >
+        {(methods) => {
+          methodsRef.current = methods;
+          return (
+            <>
+              <ProfileLinker profiles={profiles} />
+              {groups.map((g) => (
+                <SettingsCard key={g.title} title={g.title}>
+                  {g.note && (
+                    <p className="text-xs text-[--muted] -mt-1 mb-1">
+                      {g.note}
+                    </p>
+                  )}
+                  {g.keys.map((k) => (
+                    <SettingsField key={k.key} k={k} />
+                  ))}
+                </SettingsCard>
+              ))}
+              <div className="flex justify-end">
+                <SettingsSubmitButton isPending={isPending} />
+              </div>
+              <SettingsIsDirty isPending={isPending} />
+            </>
           );
-          methodsRef.current?.reset(data, { keepValues: true });
-          if (res.requiresRestart)
-            toast.warning('Some changes require a restart to take effect.', {
-              duration: 8000,
-            });
-        } catch (e: any) {
-          const issues = e?.issues as Record<string, string> | undefined;
-          if (issues)
-            for (const [key, msg] of Object.entries(issues))
-              toast.error(`${key}: ${msg}`);
-          else toast.error(e?.message ?? 'Failed to save settings');
-        }
-      }}
-    >
-      {(methods) => {
-        methodsRef.current = methods;
-        return (
-          <>
-            <ProfileLinker profiles={profiles} />
-            {groups.map((g) => (
-              <SettingsCard key={g.title} title={g.title}>
-                {g.note && (
-                  <p className="text-xs text-[--muted] -mt-1 mb-1">{g.note}</p>
-                )}
-                {g.keys.map((k) => (
-                  <SettingsField key={k.key} k={k} />
-                ))}
-              </SettingsCard>
-            ))}
-            <div className="flex justify-end">
-              <SettingsSubmitButton isPending={isPending} />
-            </div>
-            <SettingsIsDirty isPending={isPending} />
-          </>
-        );
-      }}
-    </Form>
+        }}
+      </Form>
+    </div>
   );
 }
