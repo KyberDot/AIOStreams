@@ -26,6 +26,7 @@ import {
   pbkdf2Sync,
   timingSafeEqual,
 } from 'node:crypto';
+import { ArchiveEncryptedError, ArchiveBadPasswordError } from '../errors.js';
 
 /** Max KDF exponent the format allows (`2^24` iterations). */
 const MAX_KDF_LOG2 = 24;
@@ -69,16 +70,16 @@ export interface Rar5Keys {
   pwcheck: Buffer;
 }
 
-/** Thrown when an archive is encrypted but no password was supplied. */
-export class RarEncryptedError extends Error {
+/** Thrown when a RAR archive is encrypted but no password was supplied. */
+export class RarEncryptedError extends ArchiveEncryptedError {
   constructor(message = 'rar archive is encrypted (password required)') {
     super(message);
     this.name = 'RarEncryptedError';
   }
 }
 
-/** Thrown when the supplied password fails the archive's password check. */
-export class RarBadPasswordError extends Error {
+/** Thrown when the supplied password fails a RAR archive's password check. */
+export class RarBadPasswordError extends ArchiveBadPasswordError {
   constructor(message = 'rar archive password is incorrect') {
     super(message);
     this.name = 'RarBadPasswordError';
