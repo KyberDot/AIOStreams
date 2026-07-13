@@ -400,7 +400,12 @@ function ProviderTable({ providers }: { providers: UsenetProviderStatRow[] }) {
             <th className="py-2 px-3 text-right">Data</th>
             <th className="py-2 px-3 text-right">Avg speed</th>
             <th className="py-2 px-3 text-right">Articles</th>
-            <th className="py-2 px-3 text-right">Avg latency</th>
+            <th
+              className="py-2 px-3 text-right"
+              title="How long the provider takes to answer a request for an article, before it starts sending it. Unlike the time to fetch a whole article, this does not grow when your bandwidth is shared across more streams, so it is comparable between providers."
+            >
+              Avg latency
+            </th>
             <th className="py-2 px-3 text-right">Errors</th>
             <th className="py-2 pl-3 text-right">Missing</th>
           </tr>
@@ -442,14 +447,28 @@ function ProviderTable({ providers }: { providers: UsenetProviderStatRow[] }) {
               <td className="py-2 px-3 text-right tabular-nums">
                 {formatBytes(p.bytes)}
               </td>
-              <td className="py-2 px-3 text-right tabular-nums">
+              <td
+                className="py-2 px-3 text-right tabular-nums"
+                title={
+                  p.avgArticleMs
+                    ? `${p.avgArticleMs}ms to fetch a whole article on average`
+                    : undefined
+                }
+              >
                 {p.avgBytesPerSec ? formatSpeed(p.avgBytesPerSec) : '—'}
               </td>
               <td className="py-2 px-3 text-right tabular-nums">
                 {formatCompact(p.articles)}
               </td>
-              <td className="py-2 px-3 text-right tabular-nums">
-                {p.articles ? `${p.avgLatencyMs}ms` : '—'}
+              <td
+                className="py-2 px-3 text-right tabular-nums"
+                title={
+                  p.avgLatencyMs == null && p.articles > 0
+                    ? 'Latency is only measured on fetches that had a connection to themselves, so a provider running with pipelining enabled may report none.'
+                    : undefined
+                }
+              >
+                {p.avgLatencyMs == null ? '—' : `${p.avgLatencyMs}ms`}
               </td>
               <td
                 className={cn(
@@ -496,7 +515,16 @@ function StatsSection({ data }: { data: UsenetStatsOverview }) {
         <Stat label="Articles" value={formatCompact(data.totals.articles)} />
         <Stat
           label="Avg latency"
-          value={data.totals.articles ? `${data.totals.avgLatencyMs}ms` : '—'}
+          value={
+            data.totals.avgLatencyMs == null
+              ? '—'
+              : `${data.totals.avgLatencyMs}ms`
+          }
+          hint={
+            data.totals.avgArticleMs
+              ? `${data.totals.avgArticleMs}ms per whole article`
+              : ''
+          }
         />
         <Stat
           label="Error rate"

@@ -92,7 +92,8 @@ export interface UsenetProviderStatRow {
   bytes: number;
   errors: number;
   missing: number;
-  avgLatencyMs: number;
+  avgLatencyMs: number | null;
+  avgArticleMs: number;
   avgBytesPerSec: number;
   errorRate: number;
   missRate: number;
@@ -105,7 +106,7 @@ export interface UsenetThroughputPoint {
   bytes: number;
   errors: number;
   missing: number;
-  avgLatencyMs: number;
+  avgLatencyMs: number | null;
   avgBytesPerSec: number;
 }
 
@@ -121,7 +122,8 @@ export interface UsenetStatsOverview {
     bytes: number;
     errors: number;
     missing: number;
-    avgLatencyMs: number;
+    avgLatencyMs: number | null;
+    avgArticleMs: number;
     avgBytesPerSec: number;
   };
   providers: UsenetProviderStatRow[];

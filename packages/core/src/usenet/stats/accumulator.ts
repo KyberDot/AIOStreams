@@ -22,6 +22,9 @@ interface DeltaCounters {
   sumDurationMs: number;
   /** Wall-clock busy ms (union of in-flight fetches), for avg throughput. */
   wallClockMs: number;
+  /** Sum of sampled server response times; divide by ttfbSamples, not articles. */
+  sumTtfbMs: number;
+  ttfbSamples: number;
 }
 
 interface ProviderAccumulator {
@@ -29,7 +32,10 @@ interface ProviderAccumulator {
   bytesDownloaded: number;
   missingSegments: number;
   connectionErrors: number;
+  /** Retained server-response-time samples (avg + p95 for the live snapshot). */
   latencies: number[];
+  /** Lifetime sample count, for the reservoir's overwrite cursor. */
+  latencySamples: number;
   delta: DeltaCounters;
   /** In-flight article fetches on this provider (for union busy timing). */
   inFlight: number;
@@ -46,6 +52,7 @@ function emptyAccumulator(): ProviderAccumulator {
     missingSegments: 0,
     connectionErrors: 0,
     latencies: [],
+    latencySamples: 0,
     delta: {
       articles: 0,
       bytes: 0,
@@ -53,6 +60,8 @@ function emptyAccumulator(): ProviderAccumulator {
       missing: 0,
       sumDurationMs: 0,
       wallClockMs: 0,
+      sumTtfbMs: 0,
+      ttfbSamples: 0,
     },
     inFlight: 0,
     busyStart: null,
@@ -170,14 +179,19 @@ export class StatsAccumulator {
         acc.delta.articles++;
         acc.delta.bytes += event.bytes;
         acc.delta.sumDurationMs += event.durationMs;
+        this.liveMeter.record({ bytes: event.bytes, articles: 1 });
+        break;
+      case 'latency_sample':
+        acc.delta.sumTtfbMs += event.ttfbMs;
+        acc.delta.ttfbSamples++;
+        acc.latencySamples++;
         if (acc.latencies.length < MAX_LATENCY_SAMPLES) {
-          acc.latencies.push(event.durationMs);
+          acc.latencies.push(event.ttfbMs);
         } else {
           // Reservoir-style overwrite to keep a bounded recent window.
-          acc.latencies[acc.segmentsFetched % MAX_LATENCY_SAMPLES] =
-            event.durationMs;
+          acc.latencies[acc.latencySamples % MAX_LATENCY_SAMPLES] =
+            event.ttfbMs;
         }
-        this.liveMeter.record({ bytes: event.bytes, articles: 1 });
         break;
       case 'segment_missing':
         acc.missingSegments++;
@@ -338,7 +352,7 @@ export class StatsAccumulator {
         acc.busyStart = now;
       }
       const d = acc.delta;
-      if (d.articles || d.bytes || d.errors || d.missing) {
+      if (d.articles || d.bytes || d.errors || d.missing || d.ttfbSamples) {
         out.push({ providerId, ...d, wallClockMs: busyMs });
         acc.delta = {
           articles: 0,
@@ -347,6 +361,8 @@ export class StatsAccumulator {
           missing: 0,
           sumDurationMs: 0,
           wallClockMs: 0,
+          sumTtfbMs: 0,
+          ttfbSamples: 0,
         };
       }
     }

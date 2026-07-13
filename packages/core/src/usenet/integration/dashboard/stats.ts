@@ -42,7 +42,8 @@ export interface UsenetProviderStatRow {
   bytes: number;
   errors: number;
   missing: number;
-  avgLatencyMs: number;
+  avgLatencyMs: number | null;
+  avgArticleMs: number;
   /** bytes / wall-clock busy seconds: the provider's average throughput. */
   avgBytesPerSec: number;
   /** errors / (articles + errors). */
@@ -59,7 +60,8 @@ export interface UsenetThroughputPoint {
   bytes: number;
   errors: number;
   missing: number;
-  avgLatencyMs: number;
+  /** Server response time; null when the bucket holds no samples. */
+  avgLatencyMs: number | null;
   /** Aggregate download rate for the bucket: bytes / wall-clock active time. */
   avgBytesPerSec: number;
 }
@@ -76,13 +78,23 @@ export interface UsenetStatsOverview {
     bytes: number;
     errors: number;
     missing: number;
-    avgLatencyMs: number;
+    /** Server response time across providers; null when nothing was sampled. */
+    avgLatencyMs: number | null;
+    /** Mean whole-article fetch time, transfer included (not responsiveness). */
+    avgArticleMs: number;
     /** Aggregate download rate over the window: bytes / wall-clock active time. */
     avgBytesPerSec: number;
   };
   providers: UsenetProviderStatRow[];
   throughput: UsenetThroughputPoint[];
   firstSeenAt?: number;
+}
+
+/**
+ * Mean server response time, or null when nothing was sampled.
+ */
+function avgLatency(sumTtfbMs: number, samples: number): number | null {
+  return samples > 0 ? Math.round(sumTtfbMs / samples) : null;
 }
 
 function resolveWindow(window: UsenetStatsWindow): {
@@ -143,6 +155,8 @@ export async function drainUsenetMetrics(): Promise<number> {
           missing: 0,
           sumDurationMs: 0,
           wallClockMs: 0,
+          sumTtfbMs: 0,
+          ttfbSamples: 0,
         } satisfies UsenetMetricDelta);
       cur.articles += d.articles;
       cur.bytes += d.bytes;
@@ -151,6 +165,8 @@ export async function drainUsenetMetrics(): Promise<number> {
       cur.sumDurationMs += d.sumDurationMs;
       // Per-provider wall-clock busy time (union of in-flight fetches).
       cur.wallClockMs += d.wallClockMs;
+      cur.sumTtfbMs += d.sumTtfbMs;
+      cur.ttfbSamples += d.ttfbSamples;
       merged.set(d.providerId, cur);
     }
   }
@@ -235,12 +251,17 @@ export async function getUsenetStatsOverview(
   const totalBytes = summary.reduce((s, p) => s + p.bytes, 0);
   const totalWallClockMs = summary.reduce((s, p) => s + p.wallClockMs, 0);
   const totalSpeedBytes = summary.reduce((s, p) => s + p.speedBytes, 0);
+  const totalTtfbSamples = summary.reduce((s, p) => s + p.ttfbSamples, 0);
   const totals = {
     articles: totalArticles,
     bytes: totalBytes,
     errors: summary.reduce((s, p) => s + p.errors, 0),
     missing: summary.reduce((s, p) => s + p.missing, 0),
-    avgLatencyMs: (() => {
+    avgLatencyMs: avgLatency(
+      summary.reduce((s, p) => s + p.sumTtfbMs, 0),
+      totalTtfbSamples
+    ),
+    avgArticleMs: (() => {
       const dur = summary.reduce((s, p) => s + p.sumDurationMs, 0);
       return totalArticles > 0 ? Math.round(dur / totalArticles) : 0;
     })(),
@@ -284,7 +305,8 @@ export async function getUsenetStatsOverview(
       bytes: agg?.bytes ?? 0,
       errors,
       missing,
-      avgLatencyMs:
+      avgLatencyMs: avgLatency(agg?.sumTtfbMs ?? 0, agg?.ttfbSamples ?? 0),
+      avgArticleMs:
         articles > 0 ? Math.round((agg?.sumDurationMs ?? 0) / articles) : 0,
       avgBytesPerSec:
         agg && agg.wallClockMs > 0
@@ -305,7 +327,7 @@ export async function getUsenetStatsOverview(
     bytes: b.bytes,
     errors: b.errors,
     missing: b.missing,
-    avgLatencyMs: b.articles > 0 ? Math.round(b.sumDurationMs / b.articles) : 0,
+    avgLatencyMs: avgLatency(b.sumTtfbMs, b.ttfbSamples),
     avgBytesPerSec:
       b.wallClockMs > 0 ? Math.round(b.speedBytes / (b.wallClockMs / 1000)) : 0,
   }));

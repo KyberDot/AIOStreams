@@ -308,6 +308,12 @@ export class LocalSegmentFetcher implements SegmentFetcher {
           streamingPriority: opts.streamingPriority,
           onDialError: () =>
             this.stats.record({ type: 'connection_error', providerId: p.id }),
+          onLatencySample: (ttfbMs) =>
+            this.stats.record({
+              type: 'latency_sample',
+              providerId: p.id,
+              ttfbMs,
+            }),
         };
         return new ProviderWorkerPool(p, poolOpts);
       });
@@ -730,8 +736,8 @@ export class LocalSegmentFetcher implements SegmentFetcher {
         return b.freeSlots - a.freeSlots;
       }
       // Unmeasured (0) sorts as fastest so a fresh provider gets sampled.
-      const la = a.avgLatencyMs || 0;
-      const lb = b.avgLatencyMs || 0;
+      const la = a.avgServiceTimeMs || 0;
+      const lb = b.avgServiceTimeMs || 0;
       return la - lb;
     };
     healthy.sort(order);

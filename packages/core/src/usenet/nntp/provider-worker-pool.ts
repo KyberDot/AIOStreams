@@ -109,7 +109,7 @@ export class ProviderWorkerPool {
   private authBackoffMs = 0;
 
   /** EWMAs used by the multi-pool for provider ordering. */
-  private latencyEwmaMs = 0;
+  private serviceTimeEwmaMs = 0;
   private missRateEwma = 0;
   /** Measured per-fetch throughput (bytes/ms), 0 until first sampled. */
   private throughputEwma = 0;
@@ -167,8 +167,11 @@ export class ProviderWorkerPool {
   get inFlight(): number {
     return this.inFlightTotal();
   }
-  get avgLatencyMs(): number {
-    return this.latencyEwmaMs;
+  /**
+   * Mean time to complete a whole article fetch
+   */
+  get avgServiceTimeMs(): number {
+    return this.serviceTimeEwmaMs;
   }
   get missRate(): number {
     return this.missRateEwma;
@@ -177,9 +180,11 @@ export class ProviderWorkerPool {
     return this.throughputEwma;
   }
 
-  recordLatency(ms: number): void {
-    this.latencyEwmaMs =
-      this.latencyEwmaMs === 0 ? ms : this.latencyEwmaMs * 0.8 + ms * 0.2;
+  recordServiceTime(ms: number): void {
+    this.serviceTimeEwmaMs =
+      this.serviceTimeEwmaMs === 0
+        ? ms
+        : this.serviceTimeEwmaMs * 0.8 + ms * 0.2;
   }
   recordOutcome(missing: boolean): void {
     this.missRateEwma = this.missRateEwma * 0.8 + (missing ? 1 : 0) * 0.2;
@@ -446,7 +451,7 @@ export class ProviderWorkerPool {
         // connections (touch-at-connect-only redialed active streams every
         // stale interval). Keepalive DATEs deliberately don't touch.
         conn.touch();
-        this.recordLatency(durationMs);
+        this.recordServiceTime(durationMs);
         if (res.bytes > 0) this.recordThroughput(res.bytes, durationMs);
         this.recordOutcome(false);
         req.resolve({ ...res, durationMs });
