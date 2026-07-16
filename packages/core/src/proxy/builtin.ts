@@ -10,8 +10,8 @@ import {
   Cache,
   toUrlSafeBase64,
   constants,
-  parseCredential,
-  validateCredentials,
+  checkAuthToken,
+  Permission,
   isAdminUser,
 } from '../utils/index.js';
 import z from 'zod';
@@ -26,15 +26,15 @@ export class BuiltinProxy extends BaseProxy {
     password: string;
     admin: boolean;
   } {
-    const creds = parseCredential(auth);
-    if (!creds || !validateCredentials(creds.username, creds.password)) {
-      throw new Error('Invalid credentials.');
+    const check = checkAuthToken(auth, Permission.Proxy);
+    if (!check.ok) {
+      throw new Error(`Invalid AIOStreams auth: ${check.reason}`);
     }
 
     return {
-      username: creds.username,
-      password: creds.password,
-      admin: isAdminUser(creds.username),
+      username: check.username,
+      password: check.password,
+      admin: isAdminUser(check.username),
     };
   }
 

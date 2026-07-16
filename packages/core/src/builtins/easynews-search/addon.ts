@@ -115,11 +115,7 @@ export class EasynewsSearchAddon extends BaseDebridAddon<EasynewsSearchAddonConf
   protected async _searchNzbs(parsedId: ParsedId): Promise<NZB[]> {
     // validate aiostreams auth if provided
     if (this.userData.aiostreamsAuth) {
-      try {
-        BuiltinProxy.validateAuth(this.userData.aiostreamsAuth);
-      } catch (error) {
-        throw new Error('Invalid AIOStreams Auth.');
-      }
+      BuiltinProxy.validateAuth(this.userData.aiostreamsAuth);
     }
     const metadata = await this.getSearchMetadata();
     if (!metadata.primaryTitle) {

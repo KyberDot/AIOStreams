@@ -84,16 +84,42 @@ export function validateCredentials(
   return constantTimeEquals(stored, password);
 }
 
+export type AuthTokenCheck =
+  | { ok: true; username: string; password: string }
+  | { ok: false; reason: string };
+
 /**
- * Validate a credential string (`user:pass` or `base64(user:pass)`) against the
- * AIOSTREAMS_AUTH map. Returns the parsed username on success, null otherwise.
+ * Check a credential token (`user:pass` or `base64(user:pass)`) against the
+ * AIOSTREAMS_AUTH map, optionally requiring a permission. On failure, `reason`
+ * states which check failed.
  */
-export function validateCredentialString(
-  raw: string | undefined | null
-): { username: string; password: string } | null {
-  const parsed = parseCredential(raw);
-  if (!parsed) return null;
-  return validateCredentials(parsed.username, parsed.password) ? parsed : null;
+export function checkAuthToken(
+  raw: string | undefined | null,
+  permission?: Permission
+): AuthTokenCheck {
+  const creds = parseCredential(raw);
+  if (!creds) {
+    return {
+      ok: false,
+      reason: 'credential is not a user:pass or base64(user:pass) pair',
+    };
+  }
+  if (!appConfig.bootstrap.auth?.has(creds.username)) {
+    return {
+      ok: false,
+      reason: `user "${creds.username}" not found in AIOSTREAMS_AUTH`,
+    };
+  }
+  if (!validateCredentials(creds.username, creds.password)) {
+    return { ok: false, reason: `wrong password for user "${creds.username}"` };
+  }
+  if (permission && !hasPermission(creds.username, permission)) {
+    return {
+      ok: false,
+      reason: `user "${creds.username}" lacks the "${permission}" permission`,
+    };
+  }
+  return { ok: true, username: creds.username, password: creds.password };
 }
 
 /**

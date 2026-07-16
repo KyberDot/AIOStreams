@@ -2,9 +2,7 @@ import { Request, Response, Router } from 'express';
 import {
   config as appConfig,
   createLogger,
-  validateCredentials,
-  hasPermission,
-  parseCredential,
+  checkAuthToken,
   Permission,
   handleSabnzbdRequest,
   renderSabnzbdXml,
@@ -93,16 +91,17 @@ router.all(
         send(res, 403, { status: false, error: 'API Key Required' }, xml);
         return;
       }
-      const creds = parseCredential(apikey);
-      if (!creds || !validateCredentials(creds.username, creds.password)) {
-        send(res, 403, { status: false, error: 'API Key Incorrect' }, xml);
+      const check = checkAuthToken(apikey, Permission.Sabnzbd);
+      if (!check.ok) {
+        send(
+          res,
+          403,
+          { status: false, error: `API Key Incorrect: ${check.reason}` },
+          xml
+        );
         return;
       }
-      if (!hasPermission(creds.username, Permission.Sabnzbd)) {
-        send(res, 403, { status: false, error: 'API Key Forbidden' }, xml);
-        return;
-      }
-      owner = creds.username;
+      owner = check.username;
     }
 
     const upload = pickUploadedFile(req, NZB_FIELDS);

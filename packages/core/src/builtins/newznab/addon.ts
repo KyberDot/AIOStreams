@@ -232,11 +232,7 @@ export class NewznabAddon extends BaseNabAddon<NewznabAddonConfig, NewznabApi> {
 
     if (this.userData.proxyAuth) {
       const auth = this.userData.proxyAuth;
-      try {
-        BuiltinProxy.validateAuth(auth);
-      } catch (error) {
-        throw new Error('Invalid AIOStreams Proxy Auth Credentials');
-      }
+      BuiltinProxy.validateAuth(auth);
       const proxy = createProxy({
         id: constants.BUILTIN_SERVICE,
         url: appConfig.bootstrap.baseUrl,

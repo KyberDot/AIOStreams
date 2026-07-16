@@ -917,7 +917,11 @@ export abstract class UsenetStreamService implements UsenetDebridService {
       try {
         BuiltinProxy.validateAuth(this.auth.aiostreamsAuth);
       } catch (error) {
-        throw new DebridError('Invalid AIOStreams Proxy Auth', {
+        const message =
+          error instanceof Error
+            ? error.message
+            : 'Invalid AIOStreams Proxy Auth';
+        throw new DebridError(message, {
           statusCode: 401,
           statusText: 'Unauthorized',
           code: 'UNAUTHORIZED',

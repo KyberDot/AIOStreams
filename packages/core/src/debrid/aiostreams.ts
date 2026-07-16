@@ -5,9 +5,8 @@ import {
   createLogger,
 } from '../utils/index.js';
 import {
-  validateCredentials,
+  checkAuthToken,
   parseCredential,
-  hasPermission,
   Permission,
 } from '../utils/auth.js';
 import {
@@ -70,20 +69,19 @@ export class NativeUsenetService implements UsenetDebridService {
    * holds the `service` permission. Accepts `user:pass` or `base64(user:pass)`.
    */
   private assertAuthorised(): void {
-    const creds = parseCredential(this.aiostreamsAuth);
-    if (
-      !creds ||
-      !validateCredentials(creds.username, creds.password) ||
-      !hasPermission(creds.username, Permission.Service)
-    ) {
-      throw new DebridError('Invalid AIOStreams auth for native usenet', {
-        statusCode: 401,
-        statusText: 'Unauthorized',
-        code: 'UNAUTHORIZED',
-        headers: {},
-        body: null,
-        type: 'api_error',
-      });
+    const check = checkAuthToken(this.aiostreamsAuth, Permission.Service);
+    if (!check.ok) {
+      throw new DebridError(
+        `Invalid AIOStreams auth for native usenet: ${check.reason}`,
+        {
+          statusCode: 401,
+          statusText: 'Unauthorized',
+          code: 'UNAUTHORIZED',
+          headers: {},
+          body: null,
+          type: 'api_error',
+        }
+      );
     }
   }
 

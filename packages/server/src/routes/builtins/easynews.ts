@@ -7,7 +7,7 @@ import {
   fromUrlSafeBase64,
   createLogger,
   formatZodError,
-  validateCredentials,
+  checkAuthToken,
   APIError,
   constants,
 } from '@aiostreams/core';
@@ -135,28 +135,9 @@ router.get(
         return;
       }
 
-      // Parse optional AIOStreams auth for bypass
-      let aiostreamsAuth: { username: string; password: string } | undefined;
-      if (encodedAiostreamsAuth) {
-        try {
-          const decoded = fromUrlSafeBase64(encodedAiostreamsAuth);
-          const [username, password] = decoded.split(':');
-          if (username && password) {
-            aiostreamsAuth = { username, password };
-          }
-        } catch (e) {
-          // continue without auth
-          logger.debug(
-            'Invalid AIOStreams auth in URL, continuing without bypass'
-          );
-        }
-      }
-
-      if (
-        !aiostreamsAuth ||
-        !validateCredentials(aiostreamsAuth.username, aiostreamsAuth.password)
-      ) {
-        logger.warn('Easynews NZB fetch denied: missing or invalid auth');
+      const check = checkAuthToken(encodedAiostreamsAuth);
+      if (!check.ok) {
+        logger.warn(`Easynews NZB fetch denied: ${check.reason}`);
         res.status(403).json(
           createResponse({
             error: {
