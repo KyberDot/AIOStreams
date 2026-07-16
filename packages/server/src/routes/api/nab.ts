@@ -1,9 +1,9 @@
 import { Router, Request, Response } from 'express';
 import {
   AIOStreams,
-  ApiTransformer,
   NabTransformer,
   paginateNabFeed,
+  type NabFeed,
   type NabNamespace,
   type NabQueryContext,
   renderNabFeedXml,
@@ -50,19 +50,24 @@ function isSelfCall(req: Request): boolean {
   return false;
 }
 
-interface BuiltQuery {
-  id: string;
-  type: 'movie' | 'series';
-  ctx: NabQueryContext;
-}
+type BuiltQuery =
+  | {
+      kind: 'stream';
+      id: string;
+      type: 'movie' | 'series';
+      ctx: NabQueryContext;
+    }
+  | { kind: 'rss' }
+  | { kind: 'unsupported' };
 
 /**
  * Map a newznab/torznab query to a Stremio `(id, type)`. Only ID + season/ep
- * lookups are supported; anything we can't turn into an ID (free-text `q`, or a
- * series query missing season/ep) returns `null` so the caller emits an empty
- * feed.
+ * lookups are supported. `rss` is the bare feed request (`t=search` with nothing
+ * to search for) that clients issue to test an indexer; `unsupported` is
+ * anything else we can't turn into an ID (free-text `q`, or a series query
+ * missing a season).
  */
-function buildQuery(t: string, p: Record<string, string>): BuiltQuery | null {
+function buildQuery(t: string, p: Record<string, string>): BuiltQuery {
   const season = p.season?.trim();
   const ep = p.ep?.trim();
   const isSeries = t === 'tvsearch' || (t === 'search' && !!season);
@@ -73,27 +78,40 @@ function buildQuery(t: string, p: Record<string, string>): BuiltQuery | null {
   const tmdb = (p.tmdbid ?? '').replace(/\D/g, '');
 
   let base: string | undefined;
-  let imdbId: string | undefined;
   if (imdb) {
     base = `tt${imdb}`;
-    imdbId = `tt${imdb}`;
   } else if (tvdb) {
     base = `tvdb:${tvdb}`;
   } else if (tmdb) {
     base = `tmdb:${tmdb}`;
   }
-  if (!base) return null;
+  if (!base) {
+    const bare = t === 'search' && !p.q?.trim() && !season && !ep;
+    return bare ? { kind: 'rss' } : { kind: 'unsupported' };
+  }
+
+  // Echoed back on every item, whichever id the lookup itself resolved against.
+  const ids = {
+    imdbId: imdb ? `tt${imdb}` : undefined,
+    tvdbId: tvdb || undefined,
+    tmdbId: tmdb || undefined,
+  };
 
   if (type === 'series') {
-    // The pipeline is per-episode; a season-only query has no Stremio id.
-    if (!season || !ep) return null;
+    if (!season) return { kind: 'unsupported' };
     return {
-      id: `${base}:${season}:${ep}`,
+      kind: 'stream',
+      id: `${base}:${season}:${ep || '1'}`,
       type,
-      ctx: { mediaType: 'series', imdbId, season, episode: ep },
+      ctx: { mediaType: 'series', ...ids, season, episode: ep },
     };
   }
-  return { id: base, type, ctx: { mediaType: 'movie', imdbId } };
+  return {
+    kind: 'stream',
+    id: base,
+    type,
+    ctx: { mediaType: 'movie', ...ids },
+  };
 }
 
 /**
@@ -105,20 +123,20 @@ export function createNabRouter(namespace: NabNamespace): Router {
   router.use(corsMiddleware);
   router.use(streamApiRateLimiter);
 
-  const titleCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-
-  const emptyFeed = (res: Response, xml: boolean, serverTitle: string) => {
-    const feed = {
-      title: `${serverTitle} ${titleCase(namespace)}`,
-      description: `${serverTitle} ${titleCase(namespace)} results`,
-      items: [],
-    };
+  const sendFeed = (res: Response, xml: boolean, feed: NabFeed) => {
     if (xml) {
       res.type('application/xml').send(renderNabFeedXml(namespace, feed));
     } else {
       res.json(feed);
     }
   };
+
+  const emptyFeed = (res: Response, xml: boolean, serverTitle: string) =>
+    sendFeed(res, xml, {
+      title: `${serverTitle} ${namespace}`,
+      description: `${serverTitle} ${namespace} results`,
+      items: [],
+    });
 
   const nabError = (
     res: Response,
@@ -212,7 +230,15 @@ export function createNabRouter(namespace: NabNamespace): Router {
     }
 
     const built = buildQuery(t, params);
-    if (!built) {
+    if (built.kind === 'rss') {
+      sendFeed(
+        res,
+        xml,
+        new NabTransformer(namespace, serverTitle).rssPlaceholder()
+      );
+      return;
+    }
+    if (built.kind === 'unsupported') {
       emptyFeed(res, xml, serverTitle);
       return;
     }
@@ -229,13 +255,9 @@ export function createNabRouter(namespace: NabNamespace): Router {
       await aiostreams.initialise();
       const response = await aiostreams.getStreams(built.id, built.type);
 
-      const apiData = await new ApiTransformer(userData).transformStreams(
-        response,
-        []
-      );
       const feed = paginateNabFeed(
         new NabTransformer(namespace, serverTitle).transform(
-          apiData.results,
+          response.data.streams,
           built.ctx
         ),
         {

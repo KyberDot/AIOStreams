@@ -1,5 +1,5 @@
 import XMLBuilder from 'fast-xml-builder';
-import type { SearchApiResult } from './api.js';
+import type { ParsedStream } from '../db/index.js';
 
 /**
  * Newznab / Torznab feed transformer + XML renderer.
@@ -17,6 +17,19 @@ const NS_URI: Record<NabNamespace, string> = {
 
 const CATEGORY_MOVIES = 2000;
 const CATEGORY_TV = 5000;
+
+/**
+ * Fallback age for a result with no known upload time.
+ */
+const UNKNOWN_AGE_HOURS = 24;
+
+/** Milliseconds in an hour, for age calculations. */
+const HOUR_MS = 3_600_000;
+
+/** Fake but well-formed torrent identity for the RSS placeholder item. */
+const PLACEHOLDER_INFO_HASH = '0'.repeat(40);
+/** Reserved TLD (RFC 2606), so the placeholder can never resolve to a download. */
+const PLACEHOLDER_NZB_URL = 'https://placeholder.invalid/aiostreams.nzb';
 
 /**
  * Static capability facts, declared once so the XML caps document and the
@@ -42,14 +55,17 @@ export const NAB_CAPABILITIES = {
   ],
 } as const;
 
+/** An array renders as one `<ns:attr>` element per value (e.g. `language`). */
+export type NabAttrValue = string | number | Array<string | number>;
+
 export interface NabItem {
   title: string;
   guid: string;
   size: number;
   category: number;
-  publishedAt?: number;
+  publishedAt: number;
   enclosure: { url: string; length: number; type: string };
-  attrs: Record<string, string | number>;
+  attrs: Record<string, NabAttrValue>;
 }
 
 export interface NabFeed {
@@ -63,8 +79,18 @@ export interface NabFeed {
 export interface NabQueryContext {
   mediaType: 'movie' | 'series';
   imdbId?: string;
+  tvdbId?: string;
+  tmdbId?: string;
   season?: string;
   episode?: string;
+}
+
+function isUsenetStream(stream: ParsedStream): boolean {
+  return (
+    stream.type === 'usenet' ||
+    stream.type === 'stremio-usenet' ||
+    Boolean(stream.nzbUrl)
+  );
 }
 
 function buildMagnet(
@@ -84,17 +110,62 @@ export class NabTransformer {
     private readonly addonName: string
   ) {}
 
-  transform(results: SearchApiResult[], ctx: NabQueryContext): NabFeed {
+  transform(streams: ParsedStream[], ctx: NabQueryContext): NabFeed {
     const category = ctx.mediaType === 'movie' ? CATEGORY_MOVIES : CATEGORY_TV;
-    const imdb = ctx.imdbId ? ctx.imdbId.replace(/^tt/i, '') : undefined;
     const items: NabItem[] = [];
-    for (const result of results) {
+    for (const stream of streams) {
       const item =
         this.namespace === 'newznab'
-          ? this.toNewznabItem(result, category, imdb, ctx)
-          : this.toTorznabItem(result, category, imdb, ctx);
+          ? this.toNewznabItem(stream, category, ctx)
+          : this.toTorznabItem(stream, category, ctx);
       if (item) items.push(item);
     }
+    return this.feed(items);
+  }
+
+  /**
+   * Answer for the bare RSS query (`t=search` with nothing to search for).
+   */
+  rssPlaceholder(): NabFeed {
+    const title = `${this.addonName} supports ID based search only and has no RSS feed`;
+    const category = CATEGORY_MOVIES;
+    const shared = {
+      title,
+      size: 0,
+      category,
+      publishedAt: Date.now() - UNKNOWN_AGE_HOURS * HOUR_MS,
+    };
+    const item: NabItem =
+      this.namespace === 'newznab'
+        ? {
+            ...shared,
+            guid: PLACEHOLDER_NZB_URL,
+            enclosure: {
+              url: PLACEHOLDER_NZB_URL,
+              length: 0,
+              type: 'application/x-nzb',
+            },
+            attrs: { size: 0, category },
+          }
+        : {
+            ...shared,
+            guid: PLACEHOLDER_INFO_HASH,
+            enclosure: {
+              url: buildMagnet(PLACEHOLDER_INFO_HASH, title, []),
+              length: 0,
+              type: 'application/x-bittorrent',
+            },
+            attrs: {
+              size: 0,
+              category,
+              infohash: PLACEHOLDER_INFO_HASH,
+              magneturl: buildMagnet(PLACEHOLDER_INFO_HASH, title, []),
+            },
+          };
+    return this.feed([item]);
+  }
+
+  private feed(items: NabItem[]): NabFeed {
     return {
       title: `${this.addonName} ${this.namespace}`,
       description: `${this.addonName} ${this.namespace} results`,
@@ -102,71 +173,88 @@ export class NabTransformer {
     };
   }
 
-  private common(result: SearchApiResult): {
+  private common(stream: ParsedStream): {
     title: string;
     size: number;
-    publishedAt?: number;
+    publishedAt: number;
   } {
+    const ageHours =
+      typeof stream.age === 'number' ? stream.age : UNKNOWN_AGE_HOURS;
     return {
-      title: result.folderName ?? result.filename ?? 'Unknown',
-      size: result.folderSize ?? result.size ?? 0,
-      publishedAt:
-        typeof result.age === 'number'
-          ? Date.now() - result.age * 3_600_000
-          : undefined,
+      title: stream.folderName ?? stream.filename ?? 'Unknown',
+      size: stream.folderSize ?? stream.size ?? 0,
+      publishedAt: Date.now() - ageHours * HOUR_MS,
     };
   }
 
+  /**
+   * The ids come from the query rather than the result because the pipeline
+   * matched on them but doesn't report them per-stream.
+   */
   private baseAttrs(
+    stream: ParsedStream,
     size: number,
     category: number,
-    imdb: string | undefined,
     ctx: NabQueryContext
-  ): Record<string, string | number> {
-    const attrs: Record<string, string | number> = { size, category };
-    if (imdb) attrs.imdb = imdb;
+  ): Record<string, NabAttrValue> {
+    const attrs: Record<string, NabAttrValue> = { size, category };
+    if (ctx.imdbId) attrs.imdb = ctx.imdbId.replace(/^tt/i, '');
+    if (ctx.tvdbId) attrs.tvdbid = ctx.tvdbId;
+    if (ctx.tmdbId) attrs.tmdbid = ctx.tmdbId;
     if (ctx.season) attrs.season = ctx.season;
     if (ctx.episode) attrs.episode = ctx.episode;
+
+    const parsed = stream.parsedFile;
+    if (parsed?.languages?.length) attrs.language = parsed.languages.join(',');
+    if (parsed?.subtitles?.length) attrs.subs = parsed.subtitles.join(',');
+    if (parsed?.resolution) attrs.resolution = parsed.resolution;
+    if (parsed?.year) attrs.year = parsed.year;
+    attrs.sourceAddon = stream.addon.name;
+    if (stream.indexer) attrs.sourceIndexerName = stream.indexer;
+
     return attrs;
   }
 
   private toNewznabItem(
-    result: SearchApiResult,
+    stream: ParsedStream,
     category: number,
-    imdb: string | undefined,
     ctx: NabQueryContext
   ): NabItem | null {
-    if (!result.nzbUrl) return null;
-    const { title, size, publishedAt } = this.common(result);
+    if (!stream.nzbUrl) return null;
+    const { title, size, publishedAt } = this.common(stream);
+    const attrs = this.baseAttrs(stream, size, category, ctx);
+    attrs.usenetdate = new Date(publishedAt).toUTCString();
     return {
       title,
-      guid: result.nzbUrl,
+      guid: stream.nzbUrl,
       size,
       category,
       publishedAt,
       enclosure: {
-        url: result.nzbUrl,
+        url: stream.nzbUrl,
         length: size,
         type: 'application/x-nzb',
       },
-      attrs: this.baseAttrs(size, category, imdb, ctx),
+      attrs,
     };
   }
 
   private toTorznabItem(
-    result: SearchApiResult,
+    stream: ParsedStream,
     category: number,
-    imdb: string | undefined,
     ctx: NabQueryContext
   ): NabItem | null {
-    const infoHash = result.infoHash;
-    if (!infoHash) return null;
-    const { title, size, publishedAt } = this.common(result);
-    const magnet = buildMagnet(infoHash, title, result.sources ?? []);
-    const attrs = this.baseAttrs(size, category, imdb, ctx);
+    const infoHash = stream.torrent?.infoHash;
+    if (!infoHash || isUsenetStream(stream)) return null;
+    const { title, size, publishedAt } = this.common(stream);
+    const magnet = buildMagnet(infoHash, title, stream.torrent?.sources ?? []);
+    const attrs = this.baseAttrs(stream, size, category, ctx);
     attrs.infohash = infoHash;
     attrs.magneturl = magnet;
-    if (typeof result.seeders === 'number') attrs.seeders = result.seeders;
+    if (typeof stream.torrent?.seeders === 'number') {
+      attrs.seeders = stream.torrent.seeders;
+    }
+    if (stream.torrent?.freeleech) attrs.downloadvolumefactor = 0;
     return {
       title,
       guid: infoHash,
@@ -230,9 +318,7 @@ export function renderNabFeedXml(
   const items = feed.items.map((item) => ({
     title: item.title,
     guid: { '@_isPermaLink': 'false', '#text': item.guid },
-    ...(item.publishedAt
-      ? { pubDate: new Date(item.publishedAt).toUTCString() }
-      : {}),
+    pubDate: new Date(item.publishedAt).toUTCString(),
     size: item.size,
     category: item.category,
     enclosure: {
@@ -240,10 +326,12 @@ export function renderNabFeedXml(
       '@_length': item.enclosure.length,
       '@_type': item.enclosure.type,
     },
-    [`${namespace}:attr`]: Object.entries(item.attrs).map(([name, value]) => ({
-      '@_name': name,
-      '@_value': String(value),
-    })),
+    [`${namespace}:attr`]: Object.entries(item.attrs).flatMap(([name, value]) =>
+      (Array.isArray(value) ? value : [value]).map((v) => ({
+        '@_name': name,
+        '@_value': String(v),
+      }))
+    ),
   }));
 
   const obj = {
