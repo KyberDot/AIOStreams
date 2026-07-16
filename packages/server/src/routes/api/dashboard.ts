@@ -142,6 +142,30 @@ router.get('/logs/export', (req, res) => {
   logger.info({ format }, 'logs exported');
 });
 
+// POST /dashboard/logs/clear — drop all retained log lines from the ring buffer.
+router.post('/logs/clear', (req, res) => {
+  const body = (req.body ?? {}) as { confirm?: unknown };
+  if (body.confirm !== true) {
+    return res.status(400).json(
+      createResponse({
+        success: false,
+        error: {
+          code: 'CONFIRMATION_REQUIRED',
+          message:
+            'Clearing logs is destructive and requires confirmation.',
+        },
+      })
+    );
+  }
+  const username =
+    (req as { user?: { username?: string } }).user?.username ?? 'admin';
+  logRingBuffer.clear();
+  logger.warn({ username }, 'log ring buffer cleared');
+  res
+    .status(200)
+    .json(createResponse({ success: true, data: { cleared: true } }));
+});
+
 // =============================================================================
 // Settings — schema-driven config editor
 // =============================================================================
