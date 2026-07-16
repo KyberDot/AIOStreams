@@ -1,4 +1,10 @@
-import { Cache, appConfig, createLogger } from '../utils/index.js';
+import {
+  Cache,
+  appConfig,
+  constants,
+  createLogger,
+  type ServiceId,
+} from '../utils/index.js';
 import { ParsedStream, StreamProxyConfig } from '../db/schemas.js';
 import { DebridError } from '../debrid/base.js';
 import { shouldProxyStream } from '../streams/proxifier.js';
@@ -32,6 +38,32 @@ export interface PlayChainItem {
    * so they bypass the preferred-grace window (a duplicate isn't a worse release).
    */
   variants?: PlayChainItem[];
+}
+
+/** The parts of a target {@link describeChainItem} reads. */
+type DescribableTarget = Pick<
+  PlayChainItem,
+  'type' | 'serviceId' | 'filename' | 'kind'
+> & { isVariant?: boolean };
+
+function serviceName(id: string | undefined): string | undefined {
+  if (!id) return undefined;
+  return constants.SERVICE_DETAILS[id as ServiceId]?.name ?? id;
+}
+
+/**
+ * Human-readable label for one failover target
+ */
+export function describeChainItem(
+  it: DescribableTarget,
+  role?: string
+): string {
+  const source = it.kind === 'external' ? `external ${it.type}` : it.type;
+  const service = serviceName(it.serviceId);
+  const parts = [service ? `${source} via ${service}` : source];
+  if (it.isVariant) parts.push('variant');
+  if (role) parts.push(role);
+  return `${it.filename ?? 'unknown filename'} (${parts.join(', ')})`;
 }
 
 /** What we persist per chain so the resolver can slice + filter it on click. */
@@ -191,8 +223,22 @@ export async function buildPlayChain(
     true
   );
 
+  // Every target the chain can reach, in try order. One entry per line in the
+  // log viewer, so variants are indented under the release they belong to.
+  const chain = items.flatMap((item) => [
+    describeChainItem(item),
+    ...(item.variants ?? []).map(
+      (v) => `  ↳ ${describeChainItem({ ...v, isVariant: true })}`
+    ),
+  ]);
   logger.debug(
-    { listKey, items: items.length, contentTypes: opts.contentTypes },
+    {
+      listKey,
+      releases: items.length,
+      targets: chain.length,
+      contentTypes: opts.contentTypes,
+      chain,
+    },
     'stored play chain'
   );
 
@@ -235,6 +281,8 @@ export interface ResolvedPlayChain {
   maxWaitMs: number;
   /** Proxy config snapshot for wrapping resolved URLs. */
   proxyConfig?: StreamProxyConfig;
+  /** The clicked item itself, for labelling its attempt. */
+  clicked?: PlayChainItem;
   /** Whether a URL resolved from the clicked item should be proxied. */
   clickedProxied?: boolean;
   /** Delay between launching same-release variant attempts (ms). */
@@ -340,6 +388,7 @@ export async function getPlayChain(
     preferredGraceMs: record.preferredGraceMs,
     maxWaitMs: record.maxWaitMs,
     proxyConfig: record.proxyConfig,
+    clicked: clickedItem,
     clickedProxied: clickedItem?.proxied,
     duplicateStaggerMs: record.duplicateStaggerMs,
   };

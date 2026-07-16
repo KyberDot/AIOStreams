@@ -7,6 +7,7 @@ import {
   DebridError,
   decodeFallbackKey,
   decodeFileInfo,
+  describeChainItem,
   getPlayChain,
   parsePlaybackUrl,
   resolvePlaybackTarget,
@@ -170,14 +171,11 @@ router.get(
             : Promise.reject(new Error('unparseable fallback url'));
         };
 
-      const labelFor = (name: string | undefined, descriptor: string): string =>
-        `${name ?? 'unknown'} (${descriptor})`;
-      const descriptorFor = (it: PlayChainItem, base: string): string =>
-        it.kind === 'external' ? `${base}:external` : base;
-
       const attempts: FailoverAttempt[] = [
         {
-          label: labelFor(filename, 'clicked'),
+          label: chain?.clicked
+            ? describeChainItem(chain.clicked, 'clicked')
+            : describeChainItem({ type: clickedType, filename }, 'clicked'),
           rank: 0,
           resolve: (signal) =>
             resolvePlaybackTarget(
@@ -188,10 +186,7 @@ router.get(
         },
         ...fallbacks.map(
           (f): FailoverAttempt => ({
-            label: labelFor(
-              f.filename,
-              descriptorFor(f, f.isVariant ? `${f.type}:variant` : f.type)
-            ),
+            label: describeChainItem(f),
             rank: f.rank,
             resolve: resolveTarget(f),
           })
@@ -206,11 +201,29 @@ router.get(
         duplicateStaggerMs: chain?.duplicateStaggerMs ?? 0,
       };
 
-      logger.debug('Attempting debrid resolve', {
-        attempts: attempts.length,
-        parallel: runCfg.parallel,
-        clickedType,
-      });
+      if (hasFailover) {
+        logger.info(
+          {
+            attempts: attempts.length,
+            parallel: runCfg.parallel,
+            clickedType,
+            chain: attempts.map((a, i) => {
+              const label = a.label ?? 'unknown';
+              // Index 0 is the clicked item, the fallbacks follow in order.
+              // Variants are indented under the release they belong to.
+              return i > 0 && fallbacks[i - 1]?.isVariant
+                ? `  ↳ ${label}`
+                : label;
+            }),
+          },
+          'resolving failover chain'
+        );
+      } else {
+        logger.debug(
+          { clickedType, attempt: attempts[0].label },
+          'no failover targets; resolving the clicked item only'
+        );
+      }
 
       const run = () => runPlayChain(attempts, runCfg);
 

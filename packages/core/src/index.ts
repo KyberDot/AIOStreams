@@ -40,6 +40,7 @@ export { PresetManager } from './presets/index.js';
 export {
   buildPlayChain,
   getPlayChain,
+  describeChainItem,
   isFailoverRetryableError,
 } from './main/play-chain.js';
 export type {
