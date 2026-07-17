@@ -510,10 +510,13 @@ message(streams, 'includes', 'cached')
 
 Filter for [SeaDex](https://releases.moe)-listed streams (best anime releases).
 
-| Parameter | Type               | Description                                                                     |
-| --------- | ------------------ | ------------------------------------------------------------------------------- |
-| `streams` | `ParsedStream[]`   | Stream list                                                                     |
-| `type`    | `'best' \| 'all'?` | `'best'` for only SeaDex "Best" entries; omit or `'all'` for all SeaDex matches |
+Streams are matched against SeaDex in two ways: by **info hash** (exact, the stream is one of the listed torrents) or, when the hash doesn't match, by **release group** (heuristic, the stream comes from a group listed on the SeaDex entry).
+
+| Parameter | Type                        | Description                                                                                                              |
+| --------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `streams` | `ParsedStream[]`            | Stream list                                                                                                              |
+| `type`    | `'best' \| 'alt' \| 'all'?` | `'best'` for only SeaDex "Best" entries; `'alt'` for listed-but-not-best entries; omit or `'all'` for all SeaDex matches |
+| `method`  | `'hash' \| 'group'?`        | Restrict to a match method; omit for both. Use `'hash'` if you only want exact matches                                   |
 
 <Callout type="info">
   Only active when SeaDex integration is enabled under **Filters →
@@ -522,6 +525,8 @@ Filter for [SeaDex](https://releases.moe)-listed streams (best anime releases).
 
 ```
 seadex(streams, 'best')
+seadex(streams, 'all', 'hash')
+seadex(streams, 'best', 'hash')
 ```
 
 ---

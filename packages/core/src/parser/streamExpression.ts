@@ -1119,7 +1119,8 @@ export abstract class StreamExpressionEngine {
 
     this.parser.functions.seadex = function (
       streams: ParsedStream[],
-      filterType?: string
+      filterType?: string,
+      matchMethod?: string
     ) {
       if (!Array.isArray(streams) || streams.some((stream) => !stream.type)) {
         const nonStream = streams.find((s) => typeof s !== 'object' || !s.type);
@@ -1128,14 +1129,23 @@ export abstract class StreamExpressionEngine {
       }
 
       const filter = filterType?.toLowerCase() || 'all';
+      const method = matchMethod?.toLowerCase() || 'any';
 
-      if (filter === 'best') {
-        // Only return SeaDex "best" releases
-        return streams.filter((stream) => stream.seadex?.isBest === true);
-      }
-
-      // Return all SeaDex releases (includes group fallback matches)
-      return streams.filter((stream) => stream.seadex?.isSeadex === true);
+      return streams.filter((stream) => {
+        if (stream.seadex?.isSeadex !== true) {
+          return false;
+        }
+        if (filter === 'best' && stream.seadex.isBest !== true) {
+          return false;
+        }
+        if (filter === 'alt' && stream.seadex.isBest === true) {
+          return false;
+        }
+        if (method !== 'any' && stream.seadex.method !== method) {
+          return false;
+        }
+        return true;
+      });
     };
 
     this.parser.functions.seScore = function (

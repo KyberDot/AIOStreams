@@ -1097,6 +1097,7 @@ export const ParsedStreamSchema = z.object({
     .object({
       isBest: z.boolean(),
       isSeadex: z.boolean(),
+      method: z.enum(['hash', 'group']).optional(),
     })
     .optional(),
   passthrough: PassthroughSchema.optional(),
@@ -1317,6 +1318,7 @@ export const AIOStream = StreamSchema.extend({
         .object({
           isBest: z.boolean(),
           isSeadex: z.boolean(),
+          method: z.enum(['hash', 'group']).optional(),
         })
         .optional(),
       size: z.number().optional(),

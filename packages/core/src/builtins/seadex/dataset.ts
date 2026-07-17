@@ -10,6 +10,7 @@ import { BaseDataset } from '../base/dataset.js';
 const logger = createLogger('seadex');
 
 export interface SeaDexTorrent {
+  /** Empty string when SeaDex redacts the hash. */
   infoHash: string;
   releaseGroup?: string;
   tracker?: string;
@@ -129,18 +130,25 @@ export class SeaDexDataset extends BaseDataset {
 
             const torrents: SeaDexTorrent[] = [];
             for (const tr of item.expand.trs) {
-              if (
-                typeof tr.infoHash !== 'string' ||
-                typeof tr.isBest !== 'boolean' ||
-                tr.infoHash === '' ||
-                tr.infoHash.includes('<redacted>')
-              ) {
+              if (typeof tr.isBest !== 'boolean') {
+                continue;
+              }
+
+              const rawHash =
+                typeof tr.infoHash === 'string' ? tr.infoHash : '';
+              const redacted = rawHash === '' || rawHash.includes('<redacted>');
+              const releaseGroup =
+                typeof tr.releaseGroup === 'string' && tr.releaseGroup !== ''
+                  ? tr.releaseGroup
+                  : undefined;
+
+              if (redacted && !releaseGroup) {
                 continue;
               }
 
               torrents.push({
-                infoHash: tr.infoHash.toLowerCase(),
-                releaseGroup: tr.releaseGroup,
+                infoHash: redacted ? '' : rawHash.toLowerCase(),
+                releaseGroup,
                 isBest: tr.isBest,
                 files: Array.isArray(tr.files) ? tr.files : [],
                 tracker: tr.tracker,

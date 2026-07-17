@@ -660,7 +660,9 @@ export class StreamContext {
         : undefined,
       anilistId: this.animeEntry?.mappings?.anilistId,
       malId: this.animeEntry?.mappings?.malId,
-      hasSeaDex: !!this._seadex?.allHashes?.size,
+      hasSeaDex: !!(
+        this._seadex?.allHashes?.size || this._seadex?.allGroups?.size
+      ),
       maxSeScore,
       maxRegexScore,
     };
@@ -703,7 +705,9 @@ export class StreamContext {
       anilistId: this.animeEntry?.mappings?.anilistId,
       malId: this.animeEntry?.mappings?.malId,
       // SeaDex availability
-      hasSeaDex: !!this._seadex?.allHashes?.size,
+      hasSeaDex: !!(
+        this._seadex?.allHashes?.size || this._seadex?.allGroups?.size
+      ),
     };
   }
 }

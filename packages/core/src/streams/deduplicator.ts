@@ -571,7 +571,13 @@ class StreamDeduplicator {
     }
     if (fields.includes('seadex') && !winner.seadex) {
       const withSeadex = others.filter((s) => s.seadex);
-      const best = withSeadex.find((s) => s.seadex?.isBest) ?? withSeadex[0];
+      const best =
+        withSeadex.find(
+          (s) => s.seadex?.isBest && s.seadex.method === 'hash'
+        ) ??
+        withSeadex.find((s) => s.seadex?.isBest) ??
+        withSeadex.find((s) => s.seadex?.method === 'hash') ??
+        withSeadex[0];
       if (best?.seadex) winner.seadex = best.seadex;
     }
     if (fields.includes('sizes')) {
