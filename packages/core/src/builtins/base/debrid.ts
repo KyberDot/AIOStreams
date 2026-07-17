@@ -181,7 +181,10 @@ export abstract class BaseDebridAddon<T extends BaseDebridConfig> {
         type
       ).then((metadata) => {
         if (metadata.primaryTitle) {
-          metadata.primaryTitle = cleanTitle(metadata.primaryTitle);
+          metadata.primaryTitle = cleanTitle(
+            metadata.primaryTitle,
+            metadata.originalLanguage
+          );
           this.logger.debug(
             `Cleaned primary title for ${id}: ${metadata.primaryTitle}`
           );
@@ -478,7 +481,7 @@ export abstract class BaseDebridAddon<T extends BaseDebridConfig> {
         } else if (spec === 'all') {
           metadata.titlesWithLang
             ?.slice(0, appConfig.builtins.scrape.titleLimit)
-            .forEach((t) => selected.add(cleanTitle(t.title)));
+            .forEach((t) => selected.add(cleanTitle(t.title, t.language)));
           break; // no need to process further specs
         } else if (spec === 'original') {
           // First title in the content's original language (from TMDB).
@@ -487,13 +490,13 @@ export abstract class BaseDebridAddon<T extends BaseDebridConfig> {
                 (t) => t.language === metadata.originalLanguage
               )
             : undefined;
-          if (match) selected.add(cleanTitle(match.title));
+          if (match) selected.add(cleanTitle(match.title, match.language));
         } else {
           // take only the first matching title.
           const match = metadata.titlesWithLang?.find(
             (t) => t.language === spec
           );
-          if (match) selected.add(cleanTitle(match.title));
+          if (match) selected.add(cleanTitle(match.title, match.language));
         }
       }
       titles = [...selected];
@@ -502,9 +505,12 @@ export abstract class BaseDebridAddon<T extends BaseDebridConfig> {
         titles = [metadata.primaryTitle];
       }
     } else if (options?.useAllTitles) {
-      titles = metadata.titles
+      titles = (
+        metadata.titlesWithLang ??
+        metadata.titles.map((title) => ({ title, language: undefined }))
+      )
         .slice(0, appConfig.builtins.scrape.titleLimit)
-        .map(cleanTitle);
+        .map((t) => cleanTitle(t.title, t.language));
     } else {
       titles = [metadata.primaryTitle];
     }

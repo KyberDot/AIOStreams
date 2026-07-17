@@ -347,7 +347,10 @@ export class LibraryAddon extends BaseDebridAddon<LibraryAddonConfig> {
     this._searchMetadataPromise = this._getSearchMetadata(parsedId, type).then(
       (metadata) => {
         if (metadata.primaryTitle) {
-          metadata.primaryTitle = cleanTitle(metadata.primaryTitle);
+          metadata.primaryTitle = cleanTitle(
+            metadata.primaryTitle,
+            metadata.originalLanguage
+          );
         }
         return metadata;
       }
