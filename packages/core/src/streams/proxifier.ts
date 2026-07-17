@@ -1,6 +1,7 @@
 import { config as appConfig } from '../config/index.js';
 import { ParsedStream, StreamProxyConfig, UserData } from '../db/schemas.js';
 import { constants, createLogger } from '../utils/index.js';
+import { takeBasicAuthFromUrl } from '../utils/http.js';
 import { createProxy } from '../proxy/index.js';
 import { PLAYBACK_PATH_PREFIX } from '../debrid/utils.js';
 
@@ -145,19 +146,14 @@ class Proxifier {
               response: normaliseHeaders(stream.responseHeaders),
               request: normaliseHeaders(stream.requestHeaders),
             };
-            if (parsedUrl && parsedUrl.username && parsedUrl.password) {
+            const basicAuth = parsedUrl
+              ? takeBasicAuthFromUrl(parsedUrl)
+              : undefined;
+            if (parsedUrl && basicAuth) {
               headers.request = {
                 ...headers.request,
-                authorization:
-                  'Basic ' +
-                  Buffer.from(
-                    `${decodeURIComponent(
-                      parsedUrl.username
-                    )}:${decodeURIComponent(parsedUrl.password)}`
-                  ).toString('base64'),
+                authorization: basicAuth,
               };
-              parsedUrl.username = '';
-              parsedUrl.password = '';
               url = parsedUrl.toString();
             }
             // Tag owned-playback URLs so the playback route can detect that a

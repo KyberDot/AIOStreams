@@ -74,35 +74,12 @@ export interface RequestOptions {
 }
 
 export async function makeRequest(url: string, options: RequestOptions) {
-  const urlObj = rewriteRequestUrl(new URL(url));
-  const { dispatcher, useProxy, proxyIndex } = resolveDispatcher(
-    urlObj,
-    options.context,
-    options.forceProxy
-  );
+  let urlObj = rewriteRequestUrl(new URL(url));
   const headers = new Headers(options.headers);
   if (options.forwardIp) {
     for (const header of HEADERS_FOR_IP_FORWARDING) {
       headers.set(header, options.forwardIp);
     }
-  }
-
-  if (urlObj.toString().startsWith(appConfig.bootstrap.internalUrl)) {
-    headers.set(INTERNAL_SECRET_HEADER, appConfig.bootstrap.internalSecret);
-  }
-
-  // Apply per-host / per-[context] override headers
-  const overrideHeaders = resolveOverrideHeaders(urlObj, options.context);
-  for (const [name, value] of Object.entries(overrideHeaders)) {
-    headers.set(name, value);
-  }
-
-  if (
-    ['none', 'false', '', 'undefined'].includes(
-      (headers.get('User-Agent') ?? '').toLowerCase().trim()
-    )
-  ) {
-    headers.delete('User-Agent');
   }
 
   // block recursive requests
@@ -126,51 +103,133 @@ export async function makeRequest(url: string, options: RequestOptions) {
     await urlCount.set(key, 1, appConfig.recursion.thresholdWindow);
   }
 
-  logger.debug(
-    {
-      url: makeUrlLogSafe(urlObj.toString()),
-      method: options.method ?? 'GET',
-      tunneled: !!dispatcher
-        ? 'true' +
-          (options.forceProxy ? ' (forced)' : ` (proxy index ${proxyIndex})`)
-        : 'false',
-      ...(appConfig.logging.logSensitiveInfo
-        ? {
-            headers: Object.fromEntries(headers.entries()),
-            dispatcher:
-              options.forceProxy ??
-              (useProxy ? appConfig.http.addonProxy[proxyIndex] : undefined),
-          }
-        : {}),
-    },
-    'http request'
-  );
+  // One signal for the whole redirect chain.
+  const signal = options.signal ?? AbortSignal.timeout(options.timeout);
+  const { redirect: redirectMode, ...rawOptions } = options.rawOptions ?? {};
+  let method = options.method ?? 'GET';
+  let body = options.body;
 
-  let response;
-  try {
-    response = await fetch(urlObj.toString(), {
-      ...options.rawOptions,
-      method: options.method,
-      body: options.body,
-      headers: headers,
-      dispatcher: dispatcher,
-      signal: options.signal ?? AbortSignal.timeout(options.timeout),
-    });
-  } catch (err) {
-    if (
-      err instanceof Error &&
-      err.name === 'TypeError' &&
-      err.message === 'fetch failed' &&
-      err.cause
-    ) {
-      const cause = { ...(err.cause as Record<string, any>) };
-      delete cause.stack;
-      logger.error({ cause }, 'fetch failed due to network error');
+  // Redirects are followed manually so the proxy ruleset, override headers,
+  // URL rewrites and internal-secret handling are re-evaluated on every hop.
+  for (let redirects = 0; ; redirects++) {
+    const { dispatcher, useProxy, proxyIndex } = resolveDispatcher(
+      urlObj,
+      options.context,
+      options.forceProxy
+    );
+
+    const basicAuth = takeBasicAuthFromUrl(urlObj);
+    if (basicAuth) {
+      headers.set('Authorization', basicAuth);
     }
-    throw err;
-  }
 
-  return response;
+    // Re-evaluated per hop so the secret never travels to a redirect target
+    // outside the internal origin.
+    if (urlObj.toString().startsWith(appConfig.bootstrap.internalUrl)) {
+      headers.set(INTERNAL_SECRET_HEADER, appConfig.bootstrap.internalSecret);
+    } else {
+      headers.delete(INTERNAL_SECRET_HEADER);
+    }
+
+    // Apply per-host / per-[context] override headers
+    const overrideHeaders = resolveOverrideHeaders(urlObj, options.context);
+    for (const [name, value] of Object.entries(overrideHeaders)) {
+      headers.set(name, value);
+    }
+
+    if (
+      ['none', 'false', '', 'undefined'].includes(
+        (headers.get('User-Agent') ?? '').toLowerCase().trim()
+      )
+    ) {
+      headers.delete('User-Agent');
+    }
+
+    logger.debug(
+      {
+        url: makeUrlLogSafe(urlObj.toString()),
+        method,
+        ...(redirects > 0 ? { redirects } : {}),
+        tunneled: !!dispatcher
+          ? 'true' +
+            (options.forceProxy ? ' (forced)' : ` (proxy index ${proxyIndex})`)
+          : 'false',
+        ...(appConfig.logging.logSensitiveInfo
+          ? {
+              headers: Object.fromEntries(headers.entries()),
+              dispatcher:
+                options.forceProxy ??
+                (useProxy ? appConfig.http.addonProxy[proxyIndex] : undefined),
+            }
+          : {}),
+      },
+      'http request'
+    );
+
+    let response;
+    try {
+      response = await fetch(urlObj.toString(), {
+        ...rawOptions,
+        method,
+        body,
+        headers: headers,
+        dispatcher: dispatcher,
+        signal,
+        redirect: redirectMode ?? 'manual',
+      });
+    } catch (err) {
+      if (
+        err instanceof Error &&
+        err.name === 'TypeError' &&
+        err.message === 'fetch failed' &&
+        err.cause
+      ) {
+        const cause = { ...(err.cause as Record<string, any>) };
+        delete cause.stack;
+        logger.error({ cause }, 'fetch failed due to network error');
+      }
+      throw err;
+    }
+
+    // Callers that set rawOptions.redirect handle redirects themselves.
+    if (redirectMode) {
+      return response;
+    }
+
+    const hop = getRedirectHop(
+      response.status,
+      response.headers.get('location'),
+      urlObj.toString(),
+      method
+    );
+    if (!hop) {
+      return response;
+    }
+
+    // Release the pooled connection held by the intermediate response.
+    await response.body?.cancel().catch(() => {});
+
+    if (redirects >= MAX_REDIRECTS) {
+      throw new Error(
+        `Exceeded ${MAX_REDIRECTS} redirects requesting ${makeUrlLogSafe(url)}`
+      );
+    }
+
+    const nextUrl = rewriteRequestUrl(new URL(hop.location));
+    if (nextUrl.origin !== urlObj.origin) {
+      for (const header of CROSS_ORIGIN_SENSITIVE_HEADERS) {
+        headers.delete(header);
+      }
+    }
+    if (hop.methodChanged) {
+      body = undefined;
+      for (const header of REQUEST_BODY_HEADERS) {
+        headers.delete(header);
+      }
+    }
+    method = hop.method;
+    urlObj = nextUrl;
+  }
 }
 
 const proxyAgents = new Map<string, Dispatcher>();
@@ -197,9 +256,89 @@ export function getProxyAgent(proxyUrl: string): Dispatcher | undefined {
     } else {
       proxyAgent = new ProxyAgent(proxyUrl);
     }
+    proxyAgents.set(proxyUrl, proxyAgent);
   }
 
   return proxyAgent;
+}
+
+const REDIRECT_STATUSES = [301, 302, 303, 307, 308];
+
+export const REQUEST_BODY_HEADERS = [
+  'content-encoding',
+  'content-language',
+  'content-location',
+  'content-length',
+  'content-type',
+];
+
+/** Headers dropped when a redirect crosses origins. */
+export const CROSS_ORIGIN_SENSITIVE_HEADERS = [
+  'authorization',
+  'proxy-authorization',
+  'cookie',
+  'host',
+];
+
+export const MAX_REDIRECTS = 20;
+
+export interface RedirectHop {
+  location: string;
+  method: string;
+  methodChanged: boolean;
+}
+
+/**
+ * Classify a response as a followable redirect and compute the next hop,
+ * applying the fetch-spec method rewrite (303 for all methods except GET/HEAD,
+ * 301/302 for POST only). Returns undefined for non-redirects and missing or
+ * invalid Location headers.
+ */
+export function getRedirectHop(
+  statusCode: number,
+  location: string | string[] | null | undefined,
+  currentUrl: string,
+  method: string
+): RedirectHop | undefined {
+  if (!REDIRECT_STATUSES.includes(statusCode)) {
+    return undefined;
+  }
+  if (typeof location !== 'string' || !location) {
+    return undefined;
+  }
+  let nextUrl: URL;
+  try {
+    nextUrl = new URL(location, currentUrl);
+  } catch {
+    return undefined;
+  }
+  const upper = method.toUpperCase();
+  const methodChanged =
+    (statusCode === 303 && upper !== 'GET' && upper !== 'HEAD') ||
+    ((statusCode === 301 || statusCode === 302) && upper === 'POST');
+  return {
+    location: nextUrl.toString(),
+    method: methodChanged ? 'GET' : method,
+    methodChanged,
+  };
+}
+
+/**
+ * Fold URL userinfo credentials into a Basic Authorization header value,
+ * stripping them from the URL.
+ */
+export function takeBasicAuthFromUrl(url: URL): string | undefined {
+  if (!url.username && !url.password) {
+    return undefined;
+  }
+  const value =
+    'Basic ' +
+    Buffer.from(
+      `${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`
+    ).toString('base64');
+  url.username = '';
+  url.password = '';
+  return value;
 }
 
 /**

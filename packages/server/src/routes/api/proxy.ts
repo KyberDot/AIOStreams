@@ -11,6 +11,10 @@ import {
   makeUrlLogSafe,
   rewriteRequestUrl,
   resolveDispatcher,
+  getRedirectHop,
+  takeBasicAuthFromUrl,
+  MAX_REDIRECTS,
+  REQUEST_BODY_HEADERS,
   validateCredentials,
   hasPermission,
   Permission,
@@ -209,15 +213,9 @@ function buildOutboundHeaders(
   )) {
     headers[name.toLowerCase()] = value;
   }
-  if (urlObj.username && urlObj.password) {
-    const basicAuth = Buffer.from(
-      `${decodeURIComponent(urlObj.username)}:${decodeURIComponent(
-        urlObj.password
-      )}`
-    ).toString('base64');
-    headers['authorization'] = `Basic ${basicAuth}`;
-    urlObj.username = '';
-    urlObj.password = '';
+  const basicAuth = takeBasicAuthFromUrl(urlObj);
+  if (basicAuth) {
+    headers['authorization'] = basicAuth;
   }
   return headers;
 }
@@ -464,11 +462,13 @@ router.all(
       const upstreamStartTime = Date.now();
       let currentUrl = data.url;
 
-      const maxRedirects = 10;
       let redirectCount = 0;
       let method = req.method as Dispatcher.HttpMethod;
+      // Set once a redirect rewrites the method to GET: the client body was
+      // consumed on the first hop and must not be resent or described.
+      let bodyDropped = false;
 
-      while (redirectCount < maxRedirects) {
+      while (true) {
         const grabContext = data.type === 'nzb' ? 'nzb_grabs' : undefined;
         const urlObj = rewriteRequestUrl(new URL(currentUrl));
         const { dispatcher, useProxy, proxyIndex } = resolveDispatcher(
@@ -481,6 +481,11 @@ router.all(
           urlObj,
           grabContext
         );
+        if (bodyDropped) {
+          for (const header of REQUEST_BODY_HEADERS) {
+            delete headers[header];
+          }
+        }
         currentUrl = urlObj.toString();
         logger.debug(
           {
@@ -505,27 +510,28 @@ router.all(
           method: method,
           headers: headers,
           dispatcher: dispatcher,
-          body: isBodyRequest ? req : undefined,
+          body: isBodyRequest && !bodyDropped ? req : undefined,
           bodyTimeout: 0,
           headersTimeout: 0,
         });
 
-        if ([301, 302, 303, 307, 308].includes(upstreamResponse.statusCode)) {
-          redirectCount++;
-          const location = upstreamResponse.headers['location'];
-          if (!location || typeof location !== 'string') {
-            break; // No location header, stop redirecting
-          }
-          currentUrl = new URL(location, currentUrl).href;
-
-          if ([301, 302, 303].includes(upstreamResponse.statusCode)) {
-            method = 'GET';
-          }
-          // For 307, 308, method remains the same
-          continue;
+        const hop = getRedirectHop(
+          upstreamResponse.statusCode,
+          upstreamResponse.headers['location'],
+          currentUrl,
+          method
+        );
+        if (!hop || redirectCount >= MAX_REDIRECTS) {
+          break;
         }
-
-        break; // Not a redirect, exit loop
+        redirectCount++;
+        // Release the pooled connection held by the intermediate response.
+        await upstreamResponse.body.dump().catch(() => {});
+        currentUrl = hop.location;
+        method = hop.method as Dispatcher.HttpMethod;
+        if (hop.methodChanged) {
+          bodyDropped = true;
+        }
       }
 
       if (!upstreamResponse) {
