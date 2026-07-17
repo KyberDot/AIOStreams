@@ -1,6 +1,7 @@
 import React from 'react';
 import { BiLockAlt, BiTrash } from 'react-icons/bi';
 import { useFormContext } from 'react-hook-form';
+import { Alert } from '@/components/ui/alert';
 import { Field } from '@/components/ui/form';
 import { BasicField } from '@/components/ui/basic-field';
 import { PasswordInput } from '@/components/ui/password-input';
@@ -102,8 +103,26 @@ function LockBadge({ env }: { env: string }) {
  * Renders one config key into the appropriate Field.* based on the
  * server-provided UI hint + metadata. Env-overridden fields are read-only
  * with a lock badge (the effective value is shown, not hidden).
+ *
+ * Deprecated fields are only served while an override is active; they render
+ * with a warning carrying the migration guidance.
  */
 export function SettingsField({ k }: { k: SettingsKey }) {
+  const control = <SettingsFieldControl k={k} />;
+  if (k.deprecated === undefined) return control;
+  return (
+    <div className="space-y-2">
+      <Alert
+        intent="warning-basic"
+        title="Deprecated"
+        description={md(k.deprecated)}
+      />
+      {control}
+    </div>
+  );
+}
+
+function SettingsFieldControl({ k }: { k: SettingsKey }) {
   const name = toName(k.key);
   const envLocked = k.source === 'environment';
   const disabled = envLocked;

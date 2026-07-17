@@ -120,6 +120,7 @@ function collect(node: Record<string, any>, sub: string[], out: Leaf[]) {
   for (const [name, child] of Object.entries(node)) {
     const childSub = [...sub, name];
     if (isRuntimeConfigField(child)) {
+      if (child.deprecated) continue;
       out.push({ sub: childSub, field: child });
     } else {
       collect(child as Record<string, any>, childSub, out);

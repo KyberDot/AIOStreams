@@ -88,6 +88,13 @@ export interface RuntimeConfigField<T extends ConfigValue = ConfigValue> {
   /** Optional UI rendering hints surfaced via `describeSettings`. */
   ui?: RuntimeConfigUiOverride;
   /**
+   * Marks the field as deprecated: omitted from the generated env-var
+   * reference and hidden from the settings UI unless an override (env or DB)
+   * is active, in which case the UI shows a deprecation warning. A string
+   * value is the migration guidance shown in that warning.
+   */
+  deprecated?: boolean | string;
+  /**
    * Transforms meant for runtime only i.e. not stored in DB.
    */
   transform?: (value: T) => T;
@@ -142,6 +149,18 @@ export interface RuntimeConfigMetadata {
   valueType: string;
   default: ConfigValue;
   source: ConfigSource;
+  /** Present when the field is deprecated; the migration guidance to show. */
+  deprecated?: string;
+}
+
+/** Resolve a field's `deprecated` flag to the warning message, or undefined. */
+export function deprecationMessage(
+  deprecated: boolean | string | undefined
+): string | undefined {
+  if (!deprecated) return undefined;
+  return typeof deprecated === 'string'
+    ? deprecated
+    : 'This setting is deprecated and will be removed in a future release.';
 }
 
 export function isRuntimeConfigField(

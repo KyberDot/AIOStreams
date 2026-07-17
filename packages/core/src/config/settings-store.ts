@@ -4,6 +4,7 @@ import { createLogger } from '../logging/logger.js';
 import { formatZodError } from '../utils/format-zod-error.js';
 import { encryptString, decryptString } from '../utils/crypto.js';
 import {
+  deprecationMessage,
   isRuntimeConfigField,
   resolveDescription,
   resolveEnvOverride,
@@ -226,6 +227,7 @@ export class SettingsStore<TSections extends SectionSchemas> {
           : storedKeysCache.has(key)
             ? 'database'
             : 'default',
+        deprecated: deprecationMessage(field.deprecated),
       });
     }
     return result;

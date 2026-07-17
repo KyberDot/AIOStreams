@@ -46,6 +46,9 @@ export interface SettingsKey {
   value: unknown;
   secretSet: boolean;
   ui: SettingsUiHint;
+  /** Present when the field is deprecated (only served while an override is
+   *  active); the migration guidance to show. */
+  deprecated?: string;
 }
 
 /** Query key for the generic settings page. */

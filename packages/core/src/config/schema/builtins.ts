@@ -277,8 +277,10 @@ export const builtinsSchema = {
       label: 'Scrape with alternative titles',
       description: {
         ui: 'Use alternative titles when scraping built-in addons. Either a boolean or a comma-separated hostname list.',
-        env: 'By default, built-in addons only use the primary title for text-based queries. `true` enables all alternative titles for every indexer; `false` (default) uses the primary title only; a comma-separated hostname list (e.g. `jackett,knaben.org`) enables it only for those indexers. Superseded per-indexer by BUILTIN_SCRAPE_TITLE_LANGUAGES.',
+        env: 'By default, built-in addons only use the primary title for text-based queries. `true` enables all alternative titles for every indexer; `false` (default) uses the primary title only; a comma-separated hostname list (e.g. `jackett,knaben.org`) enables it only for those indexers.',
       },
+      deprecated:
+        'Superseded by "Title languages" (`BUILTIN_SCRAPE_TITLE_LANGUAGES`), which controls titles per indexer.',
       env: 'BUILTIN_SCRAPE_WITH_ALL_TITLES',
       requiresRestart: false,
       secret: false,
@@ -558,10 +560,11 @@ export const builtinsSchema = {
       label: 'Newznab/Torznab user agent',
       env: 'BUILTIN_NAB_USER_AGENT',
       description:
-        'Deprecated: prefer `[newznab]`/`[torznab]` entries in ' +
-        '`REQUEST_HEADER_OVERRIDES` (which also support `{preset}` header ' +
-        'sets). User-Agent for Newznab/Torznab requests; the fallback when no ' +
+        'User-Agent for Newznab/Torznab requests; the fallback when no ' +
         'host/context override matches.',
+      deprecated:
+        'Prefer `[newznab]`/`[torznab]` entries in `REQUEST_HEADER_OVERRIDES` ' +
+        '(which also support `{preset}` header sets).',
       requiresRestart: false,
       secret: false,
     },
@@ -571,11 +574,12 @@ export const builtinsSchema = {
       label: 'Newznab/Torznab HTTP proxy',
       env: 'BUILTIN_NAB_HTTP_PROXY',
       description:
-        'Deprecated: add the proxy URL to `ADDON_PROXY` and route Newznab/Torznab ' +
-        'through it with a `[newznab]`/`[torznab]` entry in `ADDON_PROXY_CONFIG` ' +
-        '(e.g. `[newznab]:0`). Per-protocol HTTP proxy override ' +
-        '(`torznab:URL,newznab:URL`); still honoured and overrides the global ' +
-        'addon proxy when set.',
+        'Per-protocol HTTP proxy override (`torznab:URL,newznab:URL`); still ' +
+        'honoured and overrides the global addon proxy when set.',
+      deprecated:
+        'Add the proxy URL to `ADDON_PROXY` and route Newznab/Torznab through ' +
+        'it with a `[newznab]`/`[torznab]` entry in `ADDON_PROXY_CONFIG` ' +
+        '(e.g. `[newznab]:0`).',
       requiresRestart: false,
       secret: false,
     },

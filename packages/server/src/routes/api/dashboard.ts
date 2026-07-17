@@ -179,6 +179,9 @@ router.get('/settings', (_req, res) => {
     // Fields with a bespoke editor (e.g. usenet.providers) are hidden here and
     // managed only via their dedicated dashboard; never serve their value.
     .filter((m) => !hints[m.key]?.hidden)
+    // Deprecated fields only appear while an override (env or DB) is active,
+    // so the UI can warn about it; at default they are gone entirely.
+    .filter((m) => m.deprecated === undefined || m.source !== 'default')
     .map((m) => {
       let value: unknown;
       try {
