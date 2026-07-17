@@ -80,6 +80,19 @@ export function classifyNoStreamable(content: NzbContent): {
       code: 'archive_encrypted',
     };
   }
+  // Archive parsed cleanly but its contents can't be byte-range streamed
+  // (compressed/solid volumes, an unsupported archive type, or no video
+  // inside).
+  const structural: ArchiveErrorCode[] = [
+    'archive_compressed',
+    'archive_solid',
+    'archive_unsupported',
+    'archive_no_video',
+  ];
+  for (const reason of structural) {
+    if (hasInnerReason(reason))
+      return { reason: ARCHIVE_REASONS[reason], code: reason };
+  }
   return { reason: 'No streamable files in NZB', code: 'no_streamable_files' };
 }
 
