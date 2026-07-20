@@ -172,6 +172,22 @@ function renderPattern(
 const DURATION_UNITS = ['H', 'M', 'S'] as const;
 
 /**
+ * This function exists to handle differing units between stream.duration and metadata.runtime
+ * One is stored in milliseconds, the other in minutes. This function will normalise both to milliseconds.
+ *
+ * @param duration duration in either milliseconds or minutes
+ */
+export function normaliseDuration(duration: number): number {
+  if (duration < 0) {
+    return 0;
+  }
+  if (duration < 1000) {
+    return duration * 60 * 1000; // convert minutes to milliseconds
+  }
+  return duration; // already in milliseconds
+}
+
+/**
  * @param durationInMs - duration in milliseconds
  * @param pattern - `%H` `%M` `%S` (zero padded) or `%-H` `%-M` `%-S` (bare)
  * @returns e.g. `'%H:%M:%S'` -> "01:23:45", `'[%-Hh ]%-Mm'` -> "1h 23m" / "45m"

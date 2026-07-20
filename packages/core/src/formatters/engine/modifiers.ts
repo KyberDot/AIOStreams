@@ -7,6 +7,7 @@ import {
   formatDurationPattern,
   formatDatePattern,
   makeSmall,
+  normaliseDuration,
 } from '../utils.js';
 import { substituteTools } from './sentinels.js';
 
@@ -115,7 +116,7 @@ const numberModifiers = {
   rbitrate: (value: number) => formatBitrate(value, true),
   sbitrate: (value: number) => formatSmartBitrate(value),
   string: (value: number) => value.toString(),
-  time: (value: number) => formatDuration(value),
+  time: (value: number) => formatDuration(normaliseDuration(value)),
   star: stars(false),
   pstar: stars(true),
 };
@@ -399,7 +400,7 @@ function compileParameterised(
       if (pattern === undefined) return undefined;
       return (value) =>
         typeof value === 'number'
-          ? formatDurationPattern(value, pattern)
+          ? formatDurationPattern(normaliseDuration(value), pattern)
           : undefined;
     }
 
