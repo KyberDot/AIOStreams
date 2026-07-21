@@ -91,6 +91,7 @@ export interface ParseValue {
     remastered: null;
     regraded: boolean;
     repack: boolean;
+    proper: boolean;
     uncensored: boolean;
     unrated: boolean;
     upscaled: boolean;
@@ -583,6 +584,7 @@ export abstract class BaseFormatter {
         regraded: stream.parsedFile?.regraded ?? false,
         remastered: null,
         repack: stream.parsedFile?.repack ?? false,
+        proper: stream.parsedFile?.proper ?? false,
         uncensored: stream.parsedFile?.uncensored ?? false,
         unrated: stream.parsedFile?.unrated ?? false,
         upscaled: stream.parsedFile?.upscaled ?? false,

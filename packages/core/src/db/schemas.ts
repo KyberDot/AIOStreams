@@ -1028,6 +1028,7 @@ export const ParsedFileSchema = z.object({
   episodes: z.array(z.number()).optional(),
   editions: z.array(z.string()).optional(),
   regraded: z.boolean().optional(),
+  proper: z.boolean().optional(),
   repack: z.boolean().optional(),
   uncensored: z.boolean().optional(),
   unrated: z.boolean().optional(),

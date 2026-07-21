@@ -50,6 +50,7 @@ export const FIELD_REGISTRY: Readonly<Record<string, readonly string[]>> = {
     'remastered',
     'regraded',
     'repack',
+    'proper',
     'uncensored',
     'unrated',
     'upscaled',

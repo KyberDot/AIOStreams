@@ -142,6 +142,7 @@ class FileParser {
       editions: parsed.editions,
       regraded: parsed.regraded ?? false,
       repack: parsed.repack ?? false,
+      proper: parsed.proper ?? false,
       uncensored: parsed.uncensored ?? false,
       unrated: parsed.unrated ?? false,
       upscaled: parsed.upscaled ?? false,
