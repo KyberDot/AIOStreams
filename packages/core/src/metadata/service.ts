@@ -1,5 +1,11 @@
 ﻿import { DistributedLock } from '../utils/distributed-lock.js';
-import { deduplicateTitles, Metadata, MetadataTitle } from './utils.js';
+import { Metadata, MetadataTitle } from './utils.js';
+import {
+  assembleTitles,
+  mergeMetadata,
+  SourceContribution,
+  SourceContributions,
+} from './merge.js';
 import { TMDBMetadata } from './tmdb.js';
 import { getTraktAliases } from './trakt.js';
 import { IMDBMetadata } from './imdb.js';
@@ -57,28 +63,9 @@ export class MetadataService {
           `metadata:${id.mediaType}:${id.type}:${id.value}:${id.season ?? ''}:${id.episode ?? ''}${this.config.tmdbAccessToken || this.config.tmdbApiKey ? ':tmdb' : ''}${this.config.tvdbApiKey ? ':tvdb' : ''}`,
           async () => {
             const start = Date.now();
-            const titles: MetadataTitle[] = [];
-            let releaseDate: string | undefined;
-            let year: number | undefined;
-            let yearEnd: number | undefined;
-            let originalLanguage: string | undefined;
-            let runtime: number | undefined;
-            let genres: string[] = [];
-            let seasons:
-              | {
-                  season_number: number;
-                  episode_count: number;
-                }[]
-              | undefined;
-            let nextAirDate: string | undefined;
-            let lastAiredDate: string | undefined;
-            let firstAiredDate: string | undefined;
+            // fill order is irrelevant; merge.ts decides what wins
+            const contributions: SourceContributions = {};
             let cinemetaVideos: CinemetaVideo[] | undefined;
-            // each provider's primary title, for explicit priority selection
-            let tmdbTitle: string | undefined;
-            let tvdbTitle: string | undefined;
-            let cinemetaTitle: string | undefined;
-            let imdbSuggestionTitle: string | undefined;
 
             // Check anime database first
             const animeEntry = AnimeDatabase.getInstance().getEntryById(
@@ -130,15 +117,22 @@ export class MetadataService {
             }
 
             if (animeEntry) {
+              const aliases: MetadataTitle[] = [];
               if (animeEntry.imdb?.title)
-                titles.push({ title: animeEntry.imdb.title });
+                aliases.push({ title: animeEntry.imdb.title });
               if (animeEntry.trakt?.title)
-                titles.push({ title: animeEntry.trakt.title });
-              if (animeEntry.title) titles.push({ title: animeEntry.title });
+                aliases.push({ title: animeEntry.trakt.title });
+              if (animeEntry.title) aliases.push({ title: animeEntry.title });
               if (animeEntry.synonyms)
-                titles.push(...animeEntry.synonyms.map((s) => ({ title: s })));
-              year = animeEntry.animeSeason?.year ?? undefined;
+                aliases.push(...animeEntry.synonyms.map((s) => ({ title: s })));
+              contributions.anime = {
+                aliases,
+                year: animeEntry.animeSeason?.year ?? undefined,
+              };
             }
+
+            // ids already known without asking a provider
+            contributions.request = { tmdbId, tvdbId };
 
             // Setup parallel API requests
             const promises = [];
@@ -199,8 +193,9 @@ export class MetadataService {
               promises.push(Promise.resolve(undefined));
             }
 
-            // Skyhook (Sonarr's keyless TVDB proxy): fallback when there is no
-            // TVDB key but we have a tvdbId
+            // Skyhook is Sonarr's keyless TVDB proxy. Fetched up front only when
+            // there is no key; a keyed lookup that fails retries it below, so the
+            // common path costs no extra request.
             const tvdbKeyAvailable = !!(
               this.config.tvdbApiKey || appConfig.metadata.tvdb.apiKey
             );
@@ -230,33 +225,30 @@ export class MetadataService {
             // Process TMDB results
             if (tmdbResult.status === 'fulfilled' && tmdbResult.value) {
               const tmdbMetadata = tmdbResult.value;
-              if (tmdbMetadata.title) {
-                tmdbTitle = tmdbMetadata.title;
-                titles.unshift({ title: tmdbMetadata.title });
-              }
-              // Mark TMDB titles as trusted so their language tags are preserved
-              // during deduplication even when lower-quality sources (TVDB, Trakt,
-              // IMDb) return the same title without a language tag.
-              if (tmdbMetadata.titles)
-                titles.push(
-                  ...tmdbMetadata.titles.map((t) => ({
-                    ...t,
-                    trusted: true as const,
-                  }))
-                );
-              if (tmdbMetadata.year) year = tmdbMetadata.year;
-              if (tmdbMetadata.yearEnd) yearEnd = tmdbMetadata.yearEnd;
-              if (tmdbMetadata.originalLanguage)
-                originalLanguage = tmdbMetadata.originalLanguage;
-              if (tmdbMetadata.releaseDate)
-                releaseDate = tmdbMetadata.releaseDate;
-              if (tmdbMetadata.seasons)
-                seasons = tmdbMetadata.seasons.sort(
-                  (a, b) => a.season_number - b.season_number
-                );
-              if (tmdbMetadata.runtime) runtime = tmdbMetadata.runtime;
-              if (tmdbMetadata.genres) genres = tmdbMetadata.genres;
-              tmdbId = tmdbMetadata.tmdbId;
+              contributions.tmdb = {
+                primaryTitle: tmdbMetadata.title,
+                // Mark TMDB titles as trusted so their language tags are preserved
+                // during deduplication even when lower-quality sources (TVDB, Trakt,
+                // IMDb) return the same title without a language tag.
+                aliases: tmdbMetadata.titles?.map((t) => ({
+                  ...t,
+                  trusted: true as const,
+                })),
+                year: tmdbMetadata.year,
+                yearEnd: tmdbMetadata.yearEnd,
+                originalLanguage: tmdbMetadata.originalLanguage,
+                releaseDate: tmdbMetadata.releaseDate,
+                seasons: tmdbMetadata.seasons
+                  ? [...tmdbMetadata.seasons].sort(
+                      (a, b) => a.season_number - b.season_number
+                    )
+                  : undefined,
+                runtime: tmdbMetadata.runtime,
+                genres: tmdbMetadata.genres,
+                firstAiredDate: tmdbMetadata.firstAiredDate,
+                lastAiredDate: tmdbMetadata.lastAiredDate,
+                tmdbId: tmdbMetadata.tmdbId,
+              };
             } else if (tmdbResult.status === 'rejected') {
               logger.warn(
                 `Failed to fetch TMDB metadata for ${id.fullId}: ${tmdbResult.reason}`
@@ -266,98 +258,69 @@ export class MetadataService {
             // Process TVDB results
             if (tvdbResult.status === 'fulfilled' && tvdbResult.value) {
               const tvdbMetadata = tvdbResult.value;
-              if (tvdbMetadata.title) {
-                tvdbTitle = tvdbMetadata.title;
-                titles.unshift({ title: tvdbMetadata.title });
-              }
-              if (tvdbMetadata.titles) titles.push(...tvdbMetadata.titles);
-              if (tvdbMetadata.year) year = tvdbMetadata.year;
-              if (tvdbMetadata.yearEnd) yearEnd = tvdbMetadata.yearEnd;
-              if (tvdbMetadata.runtime && !runtime)
-                runtime = tvdbMetadata.runtime;
-              if (
-                tvdbMetadata.nextAirDate &&
-                this.isDateInFuture(tvdbMetadata.nextAirDate)
-              )
-                nextAirDate = tvdbMetadata.nextAirDate;
-              if (tvdbMetadata.lastAiredDate)
-                lastAiredDate = tvdbMetadata.lastAiredDate;
-              if (tvdbMetadata.firstAiredDate)
-                firstAiredDate = tvdbMetadata.firstAiredDate;
-              tvdbId = tvdbMetadata.tvdbId;
+              contributions.tvdb = {
+                primaryTitle: tvdbMetadata.title,
+                aliases: tvdbMetadata.titles,
+                year: tvdbMetadata.year,
+                yearEnd: tvdbMetadata.yearEnd,
+                runtime: tvdbMetadata.runtime,
+                nextAirDate:
+                  tvdbMetadata.nextAirDate &&
+                  this.isDateInFuture(tvdbMetadata.nextAirDate)
+                    ? tvdbMetadata.nextAirDate
+                    : undefined,
+                lastAiredDate: tvdbMetadata.lastAiredDate,
+                firstAiredDate: tvdbMetadata.firstAiredDate,
+                originalLanguage: tvdbMetadata.originalLanguage,
+                tvdbId: tvdbMetadata.tvdbId,
+              };
             } else if (tvdbResult.status === 'rejected') {
               logger.warn(
                 `Failed to fetch TVDB metadata for ${id.fullId}: ${tvdbResult.reason}`
               );
             }
 
-            if (skyhookResult.status === 'fulfilled' && skyhookResult.value) {
-              const sky = skyhookResult.value;
-              if (sky.title) {
-                tvdbTitle = tvdbTitle ?? sky.title;
-                titles.push({ title: sky.title, language: 'en' });
-              }
-              if (sky.year && !year) year = sky.year;
-              if (sky.originalLanguage && !originalLanguage)
-                originalLanguage = sky.originalLanguage;
-              if (sky.seasons && !seasons) seasons = sky.seasons;
-              if (sky.genres?.length)
-                genres = [...new Set([...genres, ...sky.genres])];
-              if (sky.runtime && !runtime) runtime = sky.runtime;
-              if (sky.firstAiredDate && !firstAiredDate)
-                firstAiredDate = sky.firstAiredDate;
-              if (sky.lastAiredDate && !lastAiredDate)
-                lastAiredDate = sky.lastAiredDate;
-              if (sky.tmdbId && !tmdbId) tmdbId = sky.tmdbId;
-              if (sky.tvdbId && !tvdbId) tvdbId = sky.tvdbId;
-            } else if (skyhookResult.status === 'rejected') {
+            let skyhookValue: Metadata | undefined;
+            if (skyhookResult.status === 'fulfilled') {
+              skyhookValue = skyhookResult.value;
+            } else {
               logger.debug(
                 `Failed to fetch skyhook metadata for ${id.fullId}: ${skyhookResult.reason}`
               );
             }
-
-            if (!nextAirDate && type === 'series' && id.season && id.episode) {
+            // needs a tvdbId: skyhook has no other lookup key
+            if (!skyhookValue && tvdbResult.status === 'rejected' && tvdbId) {
               try {
-                const tmdb = new TMDBMetadata({
-                  accessToken: this.config.tmdbAccessToken,
-                  apiKey: this.config.tmdbApiKey,
-                });
-                let seasonNumber = Number(id.season);
-                let episodeNumber = Number(id.episode);
-                if (animeEntry) {
-                  const originalSeason = seasonNumber;
-                  seasonNumber = animeEntry.tmdb?.seasonNumber ?? seasonNumber;
-                  if (animeEntry.tmdb?.fromEpisode) {
-                    const fromEpisode = Number(animeEntry.tmdb.fromEpisode);
-                    if (
-                      seasonNumber !== originalSeason ||
-                      episodeNumber < fromEpisode
-                    ) {
-                      episodeNumber = fromEpisode + episodeNumber - 1;
-                    }
-                  }
-                }
-                if (tmdbId && seasons) {
-                  const tmdbNextAirDate = await tmdb.getNextEpisodeAirDate(
-                    Number(tmdbId),
-                    seasonNumber,
-                    episodeNumber,
-                    seasons
-                  );
-                  if (tmdbNextAirDate && this.isDateInFuture(tmdbNextAirDate)) {
-                    nextAirDate = tmdbNextAirDate;
-                  }
-                }
+                skyhookValue = await new SkyhookMetadata().getMetadata(tvdbId);
               } catch (error) {
                 logger.debug(
-                  `Failed to get next episode air date from TMDB for ${id.fullId}: ${error}`
+                  `Skyhook fallback failed for ${id.fullId}: ${error}`
                 );
               }
             }
 
+            if (skyhookValue) {
+              const sky = skyhookValue;
+              contributions.skyhook = {
+                primaryTitle: sky.title,
+                aliases: sky.title
+                  ? [{ title: sky.title, language: 'en' }]
+                  : undefined,
+                year: sky.year,
+                originalLanguage: sky.originalLanguage,
+                seasons: sky.seasons,
+                genres: sky.genres,
+                runtime: sky.runtime,
+                firstAiredDate: sky.firstAiredDate,
+                lastAiredDate: sky.lastAiredDate,
+                tmdbId: sky.tmdbId,
+                tvdbId: sky.tvdbId,
+              };
+            }
+
             // Process Trakt results
             if (traktResult.status === 'fulfilled' && traktResult.value) {
-              titles.push(...traktResult.value);
+              contributions.trakt = { aliases: traktResult.value };
             } else if (traktResult.status === 'rejected') {
               logger.warn(
                 `Failed to fetch Trakt aliases for ${id.fullId}: ${traktResult.reason}`
@@ -367,38 +330,29 @@ export class MetadataService {
             // Process IMDb results
             if (imdbResult.status === 'fulfilled' && imdbResult.value) {
               const cinemetaData = imdbResult.value;
-              if (cinemetaData.name) {
-                cinemetaTitle = cinemetaData.name;
-                titles.unshift({ title: cinemetaData.name });
-              }
-              if (cinemetaData.releaseInfo && !year) {
-                if (cinemetaData.releaseInfo) {
-                  const parts = cinemetaData.releaseInfo
-                    .toString()
-                    .split(/[-—]/);
-                  const start = parts[0]?.trim();
-                  const end = parts[1]?.trim();
+              const cinemeta: SourceContribution = {
+                primaryTitle: cinemetaData.name ?? undefined,
+                genres: cinemetaData.genres ?? undefined,
+              };
 
-                  if (start) {
-                    year = Number(start);
-                  }
-
-                  if (end) {
-                    // Handles 'YYYY-YYYY'
-                    yearEnd = Number(end);
-                  } else if (parts.length > 1) {
-                    // Handles 'YYYY-' (ongoing series)
-                    yearEnd = new Date().getFullYear();
-                  }
-                } else if (cinemetaData.year) {
-                  year = Number.isInteger(Number(cinemetaData.year))
-                    ? Number(cinemetaData.year)
-                    : undefined;
+              if (cinemetaData.releaseInfo) {
+                // IMDb writes ranges with an en dash: '2004–2010'
+                const parts = cinemetaData.releaseInfo
+                  .toString()
+                  .split(/[-–—]/);
+                const start = parts[0]?.trim();
+                const end = parts[1]?.trim();
+                if (start && Number.isFinite(Number(start)))
+                  cinemeta.year = Number(start);
+                if (end && Number.isFinite(Number(end))) {
+                  // 'YYYY-YYYY'
+                  cinemeta.yearEnd = Number(end);
+                } else if (parts.length > 1) {
+                  // 'YYYY-' (ongoing series)
+                  cinemeta.yearEnd = new Date().getFullYear();
                 }
               }
-              if (cinemetaData.genres?.length) {
-                genres = [...new Set([...genres, ...cinemetaData.genres])];
-              }
+
               if (cinemetaData.videos) {
                 cinemetaVideos = cinemetaData.videos.map((video) => ({
                   season: video.season,
@@ -424,35 +378,39 @@ export class MetadataService {
                   })
                 );
                 if (imdbSeasons.length) {
-                  seasons = imdbSeasons.sort(
+                  cinemeta.seasons = imdbSeasons.sort(
                     (a, b) => a.season_number - b.season_number
                   );
                 }
               }
 
               if (
-                !releaseDate &&
                 cinemetaData.released &&
                 typeof cinemetaData.released === 'string'
               ) {
                 const parsedReleaseDate = new Date(cinemetaData.released);
                 if (!isNaN(parsedReleaseDate.getTime())) {
-                  releaseDate = parsedReleaseDate.toISOString().split('T')[0];
+                  cinemeta.releaseDate = parsedReleaseDate
+                    .toISOString()
+                    .split('T')[0];
                 }
               }
-              if (cinemetaData.runtime && !runtime) {
-                runtime = parseDuration(
+
+              if (cinemetaData.runtime) {
+                const parsed = parseDuration(
                   cinemetaData.runtime
                     .replace('min', 'm')
                     .replace('hr', 'h')
                     .replace(' ', '')
                     .trim()
                 );
-                runtime = runtime ? Math.round(runtime / 60000) : undefined;
-                if (runtime !== undefined && runtime <= 1) {
-                  runtime = undefined;
-                }
+                const minutes = parsed ? Math.round(parsed / 60000) : undefined;
+                // a sub-minute runtime is a parse artefact, not a real duration
+                cinemeta.runtime =
+                  minutes !== undefined && minutes <= 1 ? undefined : minutes;
               }
+
+              contributions.cinemeta = cinemeta;
             } else if (imdbResult.status === 'rejected') {
               logger.warn(
                 `Failed to fetch IMDb metadata for ${imdbId}: ${imdbResult.reason}`
@@ -464,18 +422,64 @@ export class MetadataService {
               imdbSuggestionResult.value
             ) {
               const imdbSuggestionData = imdbSuggestionResult.value;
-              if (imdbSuggestionData.title) {
-                imdbSuggestionTitle = imdbSuggestionData.title;
-                titles.unshift({ title: imdbSuggestionData.title });
-              }
-              if (imdbSuggestionData.year && !year)
-                year = imdbSuggestionData.year;
-              if (imdbSuggestionData.yearEnd && !yearEnd)
-                yearEnd = imdbSuggestionData.yearEnd;
+              contributions.imdbSuggestion = {
+                primaryTitle: imdbSuggestionData.title,
+                year: imdbSuggestionData.year,
+                yearEnd: imdbSuggestionData.yearEnd,
+              };
             } else {
               logger.warn(
                 `Failed to fetch IMDb suggestion data for ${imdbId}: ${imdbSuggestionResult.status === 'rejected' ? imdbSuggestionResult.reason : 'no data'}`
               );
+            }
+
+            const mediaType = type === 'movie' ? 'movie' : 'series';
+            let merged = mergeMetadata(contributions, mediaType);
+
+            if (
+              !merged.nextAirDate &&
+              type === 'series' &&
+              id.season &&
+              id.episode
+            ) {
+              try {
+                const tmdb = new TMDBMetadata({
+                  accessToken: this.config.tmdbAccessToken,
+                  apiKey: this.config.tmdbApiKey,
+                });
+                let seasonNumber = Number(id.season);
+                let episodeNumber = Number(id.episode);
+                if (animeEntry) {
+                  const originalSeason = seasonNumber;
+                  seasonNumber = animeEntry.tmdb?.seasonNumber ?? seasonNumber;
+                  if (animeEntry.tmdb?.fromEpisode) {
+                    const fromEpisode = Number(animeEntry.tmdb.fromEpisode);
+                    if (
+                      seasonNumber !== originalSeason ||
+                      episodeNumber < fromEpisode
+                    ) {
+                      episodeNumber = fromEpisode + episodeNumber - 1;
+                    }
+                  }
+                }
+                if (merged.tmdbId && merged.seasons) {
+                  const tmdbNextAirDate = await tmdb.getNextEpisodeAirDate(
+                    Number(merged.tmdbId),
+                    seasonNumber,
+                    episodeNumber,
+                    merged.seasons
+                  );
+                  if (tmdbNextAirDate && this.isDateInFuture(tmdbNextAirDate)) {
+                    contributions.tmdbEpisode = {
+                      nextAirDate: tmdbNextAirDate,
+                    };
+                  }
+                }
+              } catch (error) {
+                logger.debug(
+                  `Failed to get next episode air date from TMDB for ${id.fullId}: ${error}`
+                );
+              }
             }
 
             let episodeFacts: EpisodeResolution | undefined;
@@ -490,29 +494,33 @@ export class MetadataService {
                   appConfig.metadata.tmdb.accessToken ||
                   appConfig.metadata.tmdb.apiKey
                 );
-                const resolvedTvdbId = tvdbId;
-                const resolvedTmdbId = tmdbId;
+                const resolvedTvdbId = merged.tvdbId;
+                const resolvedTmdbId = merged.tmdbId;
                 episodeFacts = await resolveEpisodeFacts({
                   season: Number(id.season),
                   episode: Number(id.episode),
                   isAnime: !!animeEntry,
-                  genres,
-                  seasons,
+                  genres: merged.genres,
+                  seasons: merged.seasons,
                   cinemetaVideos,
+                  // skyhook also covers a keyed TVDB that errored or has no
+                  // record of the season
                   fetchTvdbSeasonEpisodes: resolvedTvdbId
-                    ? tvdbAvailable
-                      ? (seasonNumber) =>
-                          new TVDBMetadata({
+                    ? async (seasonNumber) => {
+                        if (tvdbAvailable) {
+                          const episodes = await new TVDBMetadata({
                             apiKey: this.config.tvdbApiKey,
                           }).getSeasonEpisodes(
                             Number(resolvedTvdbId),
                             seasonNumber
-                          )
-                      : (seasonNumber) =>
-                          new SkyhookMetadata().getSeasonEpisodes(
-                            Number(resolvedTvdbId),
-                            seasonNumber
-                          )
+                          );
+                          if (episodes?.length) return episodes;
+                        }
+                        return new SkyhookMetadata().getSeasonEpisodes(
+                          Number(resolvedTvdbId),
+                          seasonNumber
+                        );
+                      }
                     : undefined,
                   fetchTmdbEpisode:
                     tmdbAvailable && resolvedTmdbId
@@ -546,24 +554,27 @@ export class MetadataService {
             let sceneTitles: string[] | undefined;
             if (
               type === 'series' &&
-              tvdbId &&
+              merged.tvdbId &&
               appConfig.metadata.sceneMappings.enabled
             ) {
               try {
                 const aliases =
                   SceneMappingDataset.getInstance().getSearchTitles(
-                    Number(tvdbId),
+                    Number(merged.tvdbId),
                     {
                       seasons: [
                         id.season ? Number(id.season) : undefined,
                         episodeFacts?.resolvedSeasonNumber,
                       ],
-                      canonicalTitle: titles[0]?.title,
+                      // the most canonical title known before the primary is picked
+                      canonicalTitle: assembleTitles(contributions)[0]?.title,
                     }
                   );
                 if (aliases.length) {
                   sceneTitles = aliases;
-                  titles.push(...aliases.map((title) => ({ title })));
+                  contributions.scene = {
+                    aliases: aliases.map((title) => ({ title })),
+                  };
                 }
               } catch (error) {
                 logger.debug(
@@ -572,42 +583,31 @@ export class MetadataService {
               }
             }
 
-            // Choose the primary title by explicit provider priority
-            {
-              const primaryPriority =
-                type === 'movie'
-                  ? [tmdbTitle, tvdbTitle, cinemetaTitle, imdbSuggestionTitle]
-                  : [tvdbTitle, tmdbTitle, cinemetaTitle, imdbSuggestionTitle];
-              const primaryTitle = primaryPriority.find(Boolean);
-              if (primaryTitle) {
-                titles.unshift({ title: primaryTitle });
-              }
-            }
-
-            const uniqueTitles = deduplicateTitles(titles);
+            // re-merge: the episode and scene steps added contributions
+            merged = mergeMetadata(contributions, mediaType);
 
             if (
-              !uniqueTitles.length ||
-              (year === undefined && id.mediaType === 'movie')
+              !merged.titles.length ||
+              (merged.year === undefined && id.mediaType === 'movie')
             ) {
               throw new Error(`Could not find metadata for ${id.fullId}`);
             }
 
             const metadata = {
-              title: uniqueTitles[0].title,
-              titles: uniqueTitles,
-              year,
-              yearEnd,
-              originalLanguage,
-              seasons,
-              releaseDate,
-              tmdbId,
-              tvdbId,
-              runtime,
-              genres,
-              nextAirDate,
-              firstAiredDate,
-              lastAiredDate,
+              title: merged.title,
+              titles: merged.titles,
+              year: merged.year,
+              yearEnd: merged.yearEnd,
+              originalLanguage: merged.originalLanguage,
+              seasons: merged.seasons,
+              releaseDate: merged.releaseDate,
+              tmdbId: merged.tmdbId,
+              tvdbId: merged.tvdbId,
+              runtime: merged.runtime,
+              genres: merged.genres,
+              nextAirDate: merged.nextAirDate,
+              firstAiredDate: merged.firstAiredDate,
+              lastAiredDate: merged.lastAiredDate,
               isDateBased: episodeFacts?.isDateBased || undefined,
               episodeAirDates: episodeFacts?.episodeAirDates,
               episodeAirDate: episodeFacts?.episodeAirDates?.[0],
@@ -626,7 +626,7 @@ export class MetadataService {
                 seasons: metadata.seasons?.map(
                   (s) => `{s:${s.season_number},e:${s.episode_count}}`
                 ),
-                titleCount: titles.length,
+                titleCount: merged.titleCandidateCount,
               }
             );
             return metadata;
