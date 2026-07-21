@@ -64,11 +64,46 @@ export class IdMappingDataset extends BaseDataset {
     return IdMappingDataset.instance;
   }
 
-  private buildMaps(rows: [number, number, number][]): TypeMaps {
+  /**
+   * A tvdb/tmdb id claimed by more than one imdb id is an upstream data error,
+   * not a legitimate alias, so the whole group is dropped and the id falls back
+   * to the normal per-provider lookup.
+   */
+  private buildMaps(rows: [number, number, number][], label: string): TypeMaps {
+    const conflicted = { tvdb: new Set<number>(), tmdb: new Set<number>() };
+    const claimant = {
+      tvdb: new Map<number, number>(),
+      tmdb: new Map<number, number>(),
+    };
+    for (const [imdb, tvdb, tmdb] of rows) {
+      if (!imdb) continue;
+      for (const [providerId, key] of [
+        [tvdb, 'tvdb'],
+        [tmdb, 'tmdb'],
+      ] as const) {
+        if (!providerId) continue;
+        const first = claimant[key].get(providerId);
+        if (first === undefined) claimant[key].set(providerId, imdb);
+        else if (first !== imdb) conflicted[key].add(providerId);
+      }
+    }
+
     const maps = emptyTypeMaps();
     for (const [imdb, tvdb, tmdb] of rows) {
-      if (imdb && tvdb) maps.imdbToTvdb.set(imdb, tvdb);
-      if (imdb && tmdb) maps.imdbToTmdb.set(imdb, tmdb);
+      if (imdb && tvdb && !conflicted.tvdb.has(tvdb))
+        maps.imdbToTvdb.set(imdb, tvdb);
+      if (imdb && tmdb && !conflicted.tmdb.has(tmdb))
+        maps.imdbToTmdb.set(imdb, tmdb);
+    }
+    if (conflicted.tvdb.size || conflicted.tmdb.size) {
+      logger.debug(
+        {
+          type: label,
+          tvdbIds: conflicted.tvdb.size,
+          tmdbIds: conflicted.tmdb.size,
+        },
+        'dropped id mappings claimed by multiple imdb ids'
+      );
     }
     return maps;
   }
@@ -77,10 +112,15 @@ export class IdMappingDataset extends BaseDataset {
     const data: IdMapData = JSON.parse(
       await fs.readFile(this.DATA_PATH, 'utf-8')
     );
-    this.tv = this.buildMaps(data.tv.rows);
-    this.movie = this.buildMaps(data.movie.rows);
+    this.tv = this.buildMaps(data.tv.rows, 'tv');
+    this.movie = this.buildMaps(data.movie.rows, 'movie');
     logger.info(
-      { tv: data.tv.rows.length, movie: data.movie.rows.length },
+      {
+        tv: data.tv.rows.length,
+        movie: data.movie.rows.length,
+        tvTvdb: this.tv.imdbToTvdb.size,
+        movieTvdb: this.movie.imdbToTvdb.size,
+      },
       'loaded id mappings'
     );
   }
