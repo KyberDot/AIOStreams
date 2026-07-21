@@ -70,7 +70,6 @@ export const KNOWN_BACKBONES: Record<string, readonly string[]> = {
     'xsnews.nl',
     'bonus.frugalusenet.com',
     'bonus.usenetprime.com',
-    'torbox.app',
   ],
   netnews: ['blocknews.net', 'frugalusenet.com', 'usenetnow.net'],
   'usenet-farm': [
