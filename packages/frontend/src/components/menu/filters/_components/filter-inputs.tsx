@@ -383,28 +383,46 @@ function useImportExport<T>(
 
 // Reusable item-list action buttons
 
-/** Move-up / move-down / delete buttons shared by every list item. */
+/**
+ * Move-up / move-down / delete buttons shared by every list item. Holding
+ * shift jumps the row to the end it is heading for, which beats dragging a
+ * long list past its own scroll.
+ */
 function ItemActions({ rows, index }: { rows: SortableRows; index: number }) {
   return (
     <>
-      <IconButton
-        size="sm"
-        rounded
-        icon={<FaArrowUp />}
-        intent="primary-subtle"
-        aria-label="Move up"
-        disabled={index === 0}
-        onClick={() => rows.move(index, index - 1)}
-      />
-      <IconButton
-        size="sm"
-        rounded
-        icon={<FaArrowDown />}
-        intent="primary-subtle"
-        aria-label="Move down"
-        disabled={index === rows.count - 1}
-        onClick={() => rows.move(index, index + 1)}
-      />
+      <Tooltip
+        trigger={
+          <IconButton
+            size="sm"
+            rounded
+            icon={<FaArrowUp />}
+            intent="primary-subtle"
+            aria-label="Move up"
+            disabled={index === 0}
+            onClick={(e) => rows.move(index, e.shiftKey ? 0 : index - 1)}
+          />
+        }
+      >
+        Move up (shift to move to top)
+      </Tooltip>
+      <Tooltip
+        trigger={
+          <IconButton
+            size="sm"
+            rounded
+            icon={<FaArrowDown />}
+            intent="primary-subtle"
+            aria-label="Move down"
+            disabled={index === rows.count - 1}
+            onClick={(e) =>
+              rows.move(index, e.shiftKey ? rows.count - 1 : index + 1)
+            }
+          />
+        }
+      >
+        Move down (shift to move to bottom)
+      </Tooltip>
       <IconButton
         size="sm"
         rounded
