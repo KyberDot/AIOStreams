@@ -327,6 +327,9 @@ export class TVDBMetadata {
           nextAirDate: series.nextAired ?? undefined,
           firstAiredDate: series.firstAired ?? undefined,
           lastAiredDate: series.lastAired ?? undefined,
+          originalLanguage: series.originalLanguage
+            ? iso6392ToIso6391(series.originalLanguage) || undefined
+            : undefined,
         };
       } else {
         throw new Error(`Could not find metadata for ${id.value}`);
@@ -375,6 +378,11 @@ export class TVDBMetadata {
           tmdbId: null,
           runtime: series.averageRuntime ?? undefined,
           nextAirDate: series.nextAired ?? undefined,
+          firstAiredDate: series.firstAired ?? undefined,
+          lastAiredDate: series.lastAired ?? undefined,
+          originalLanguage: series.originalLanguage
+            ? iso6392ToIso6391(series.originalLanguage) || undefined
+            : undefined,
         };
       }
     }
