@@ -1117,6 +1117,13 @@ export abstract class StreamExpressionEngine {
       return streams.filter((stream) => stream.library);
     };
 
+    this.parser.functions.idMatched = function (streams: ParsedStream[]) {
+      if (!Array.isArray(streams) || streams.some((stream) => !stream.type)) {
+        throw new Error('Your streams input must be an array of streams');
+      }
+      return streams.filter((stream) => stream.idMatched);
+    };
+
     this.parser.functions.seadex = function (
       streams: ParsedStream[],
       filterType?: string,
@@ -1541,6 +1548,7 @@ export abstract class StreamExpressionEngine {
       size: 1073741824, // 1GB in bytes
       folderSize: 2147483648, // 2GB in bytes
       library: false,
+      idMatched: false,
       url: 'https://example.com/stream.mkv',
       filename: 'test.mkv',
       folderName: 'Test Folder',

@@ -981,6 +981,7 @@ export const StreamSchema = z.looseObject({
   url: z.string().or(z.null()).optional(),
   nzbUrl: z.string().or(z.null()).optional(),
   releaseKey: ReleaseKeySchema,
+  idMatched: z.boolean().optional(),
   servers: z.array(z.string().min(1)).nullable().optional(),
   rarUrls: z.array(SourceSchema).nullable().optional(),
   zipUrls: z.array(SourceSchema).nullable().optional(),
@@ -1121,6 +1122,8 @@ export const ParsedStreamSchema = z.object({
   /**Bitrate in bps */
   bitrate: z.number().optional(),
   library: z.boolean().optional(),
+  /** Upstream matched this release against an ID-indexed source, not a text search. */
+  idMatched: z.boolean().optional(),
   seadex: z
     .object({
       isBest: z.boolean(),

@@ -928,6 +928,7 @@ export abstract class BaseDebridAddon<T extends BaseDebridConfig> {
       nzbUrl: torrentOrNzb.type === 'usenet' ? torrentOrNzb.nzb : undefined,
       releaseKey:
         torrentOrNzb.type === 'usenet' ? torrentOrNzb.releaseKey : undefined,
+      idMatched: torrentOrNzb.confirmed === true ? true : undefined,
       servers:
         torrentOrNzb.service?.id === 'stremio_nntp'
           ? (encryptedStoreAuth as string[])

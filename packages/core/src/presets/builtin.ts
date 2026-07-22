@@ -20,6 +20,10 @@ export class BuiltinStreamParser extends StreamParser {
       : undefined;
   }
 
+  protected override getIdMatched(stream: Stream): boolean | undefined {
+    return stream.idMatched === true ? true : undefined;
+  }
+
   protected override getLanguages(
     stream: Stream,
     currentParsedStream: ParsedStream

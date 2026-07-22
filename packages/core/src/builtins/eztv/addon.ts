@@ -179,6 +179,7 @@ export class EztvAddon extends BaseDebridAddon<EztvAddonConfig> {
         : undefined;
 
       torrents.push({
+        confirmed: true,
         hash,
         downloadUrl: undefined,
         sources,

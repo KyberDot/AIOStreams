@@ -569,6 +569,9 @@ class StreamDeduplicator {
     if (fields.includes('library') && !winner.library) {
       if (others.some((s) => s.library)) winner.library = true;
     }
+    if (fields.includes('idMatched') && !winner.idMatched) {
+      if (others.some((s) => s.idMatched)) winner.idMatched = true;
+    }
     if (fields.includes('seadex') && !winner.seadex) {
       const withSeadex = others.filter((s) => s.seadex);
       const best =
