@@ -203,6 +203,7 @@ export function FormatterPreview() {
               tabs={tabs}
               activeTab={activeTab}
               onTabChange={setActiveTab}
+              revealOnChange
             />
           ) : (
             <p className="text-center text-sm text-[--muted] py-6">
