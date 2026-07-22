@@ -52,12 +52,31 @@ export function deduplicateTitles(titles: MetadataTitle[]): MetadataTitle[] {
   });
 }
 
+/** Another title sharing this title's name (reboot or country variant). */
+export interface TitleConflict {
+  title: string;
+  year?: number;
+  country?: string;
+  tmdbId?: number;
+  tvdbId?: number;
+}
+
 export interface Metadata {
   title: string;
   titles?: MetadataTitle[];
   year?: number;
   yearEnd?: number;
   originalLanguage?: string;
+  country?: string;
+  /** Same-name series that results could belong to instead of this one. */
+  titleConflicts?: TitleConflict[];
+  /** Known names of the requested episode, across sources and languages. */
+  episodeTitles?: MetadataTitle[];
+  /**
+   * Years a release may legitimately be tagged with: first aired, plus the
+   * requested season's and episode's years. Series only, empty if unresolved.
+   */
+  releaseYears?: number[];
   releaseDate?: string;
   runtime?: number; // Runtime in minutes
   seasons?: {

@@ -183,6 +183,7 @@ const TitleMetadataSchema = z.object({
   titles: z.array(z.string()),
   year: z.number().optional(),
   seasonYear: z.number().optional(),
+  country: z.string().optional(),
   season: z.number().optional(),
   episode: z.number().optional(),
   absoluteEpisode: z.number().optional(),

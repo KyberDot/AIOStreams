@@ -97,6 +97,18 @@ export const metadataSchema = {
       secret: false,
     },
   },
+  titleConflicts: {
+    enabled: {
+      schema: z.boolean(),
+      default: true,
+      label: 'Title conflict detection',
+      description:
+        'Detect same-name series (reboots and country variants, e.g. The Office UK vs US) via TMDB/TVDB search so queries and matching filters can disambiguate results.',
+      env: 'TITLE_CONFLICTS_ENABLED',
+      requiresRestart: false,
+      secret: false,
+    },
+  },
   sceneMappings: {
     enabled: {
       schema: z.boolean(),

@@ -38,6 +38,7 @@ export interface SourceContribution {
   year?: number;
   yearEnd?: number;
   originalLanguage?: string;
+  country?: string;
   releaseDate?: string;
   runtime?: number;
   seasons?: { season_number: number; episode_count: number }[];
@@ -68,6 +69,7 @@ const FIELD_PRIORITY = {
   year: ['tvdb', 'tmdb', 'anime', 'skyhook', 'cinemeta', 'imdbSuggestion'],
   yearEnd: ['tvdb', 'tmdb', 'cinemeta', 'imdbSuggestion'],
   originalLanguage: ['tmdb', 'tvdb', 'skyhook'],
+  country: ['tvdb', 'tmdb', 'skyhook'],
   releaseDate: ['tmdb', 'cinemeta'],
   runtime: ['tmdb', 'tvdb', 'skyhook', 'cinemeta'],
   seasons: ['cinemeta', 'tmdb', 'skyhook'],
@@ -228,6 +230,7 @@ export type MergedMetadata = Pick<
   | 'year'
   | 'yearEnd'
   | 'originalLanguage'
+  | 'country'
   | 'releaseDate'
   | 'runtime'
   | 'seasons'
@@ -273,6 +276,7 @@ export function mergeMetadata(
     year,
     yearEnd,
     originalLanguage: resolve(contributions, 'originalLanguage', mediaType),
+    country: resolve(contributions, 'country', mediaType),
     releaseDate: resolve(contributions, 'releaseDate', mediaType),
     runtime: resolve(contributions, 'runtime', mediaType),
     seasons: resolve(contributions, 'seasons', mediaType),

@@ -61,6 +61,8 @@ export const FIELD_REGISTRY: Readonly<Record<string, readonly string[]>> = {
     'indexer',
     'year',
     'title',
+    'country',
+    'episodeTitle',
     'date',
     'folderSeasons',
     'formattedFolderSeasons',

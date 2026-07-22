@@ -27,6 +27,7 @@ import {
   preprocessTitle,
   titleMatch,
 } from '../parser/utils.js';
+import { normaliseCountryCode } from '../utils/countries.js';
 import { partial_ratio } from 'fuzzball';
 import { ParsedResult } from '@viren070/parse-torrent-title';
 
@@ -316,6 +317,21 @@ export const isEpisodeWrong = (
   }
   return false;
 };
+/**
+ * A country tag identifies which same-name show a release belongs to, even
+ * when the bare title matches. Only discriminates when both sides are known.
+ */
+export const isCountryWrong = (
+  parsed: { country?: string },
+  metadata?: { country?: string }
+) => {
+  const parsedCountry = normaliseCountryCode(parsed.country);
+  const metadataCountry = normaliseCountryCode(metadata?.country);
+  return (
+    !!parsedCountry && !!metadataCountry && parsedCountry !== metadataCountry
+  );
+};
+
 export const isTitleWrong = (
   parsed: { title?: string },
   metadata?: { titles?: string[] }
@@ -631,7 +647,10 @@ export async function selectFileInTorrentOrNZB(
         normTitles === null
           ? true
           : normTitles.has(normaliseTitle(preprocessed));
-      if (titleMatches) {
+      if (titleMatches && isCountryWrong(parsed, metadata)) {
+        score -= 200;
+        fileReport.scoreBreakdown.countryMismatchPenalty = -200;
+      } else if (titleMatches) {
         score += 200;
         fileReport.scoreBreakdown.titleMatch = 200;
       }

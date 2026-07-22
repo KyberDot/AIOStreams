@@ -20,9 +20,10 @@ import {
   preprocessTitle,
   titleMatchWithLang,
 } from '../parser/utils.js';
+import { normaliseCountryCode } from '../utils/countries.js';
 import { partial_ratio } from 'fuzzball';
 import { formatBitrate, formatBytes } from '../formatters/utils.js';
-import { iso6391ToLanguage } from '../utils/languages.js';
+import { iso6391ToLanguage, languageToCode } from '../utils/languages.js';
 import { ReleaseDate } from '../metadata/tmdb.js';
 import { StreamContext, ExtendedMetadata } from './context.js';
 
@@ -38,6 +39,7 @@ export interface FilterStatistics {
     titleMatching: Reason;
     yearMatching: Reason;
     seasonEpisodeMatching: Reason;
+    episodeTitleMatching: Reason;
     excludeSeasonPacks: Reason;
     noDigitalRelease: Reason;
     excludedStreamType: Reason;
@@ -150,6 +152,7 @@ class StreamFilterer {
         titleMatching: { total: 0, details: {} },
         yearMatching: { total: 0, details: {} },
         seasonEpisodeMatching: { total: 0, details: {} },
+        episodeTitleMatching: { total: 0, details: {} },
         excludeSeasonPacks: { total: 0, details: {} },
         noDigitalRelease: { total: 0, details: {} },
         excludedStreamType: { total: 0, details: {} },
@@ -717,6 +720,85 @@ class StreamFilterer {
       return true;
     };
 
+    const NON_SPECIFIC_LANGUAGES = ['Unknown', 'Dual Audio', 'Multi', 'Dubbed'];
+
+    /**
+     * Adds the matched title's language to a stream that declared none. English
+     * and (for anime) Japanese titles are used worldwide, so matching one says
+     * nothing about the audio.
+     *
+     * Runs after the language filters, so an inferred language cannot be
+     * filtered on in the same pass. (TODO: consider running before language filters)
+     */
+    const inferLanguageFromMatch = (
+      stream: ParsedStream,
+      language: string | undefined,
+      source: 'title' | 'episodeTitle'
+    ) => {
+      const options = this.userData.languageInference;
+      if (options?.enabled === false) return;
+      if (options?.sources?.length && !options.sources.includes(source)) {
+        return;
+      }
+      if (!language || !stream.parsedFile) return;
+      const lang = language.toLowerCase();
+      if (lang === 'en' || (isAnime && lang === 'ja')) return;
+      if (
+        stream.parsedFile.languages.some(
+          (l) => !NON_SPECIFIC_LANGUAGES.includes(l)
+        )
+      ) {
+        return;
+      }
+      const inferredLanguage = iso6391ToLanguage(lang);
+      if (
+        inferredLanguage &&
+        !stream.parsedFile.languages.includes(inferredLanguage) &&
+        LANGUAGES.includes(inferredLanguage as any)
+      ) {
+        stream.parsedFile.languages.push(inferredLanguage);
+        logger.debug(
+          `Inferred language "${inferredLanguage}" for stream "${stream.filename}" from matched ${source} language (${lang})`
+        );
+      }
+    };
+
+    // undefined = cannot judge (nothing usable parsed, or no expected titles)
+    const episodeTitleMatches = (
+      stream: ParsedStream,
+      threshold: number
+    ): boolean | undefined => {
+      const parsedEpisodeTitle = stream.parsedFile?.episodeTitle;
+      const expected = requestedMetadata?.episodeTitles;
+      if (!parsedEpisodeTitle || !expected?.length) return undefined;
+
+      const result = titleMatchWithLang(
+        normaliseTitle(parsedEpisodeTitle),
+        expected,
+        { threshold }
+      );
+      if (result.matched) {
+        inferLanguageFromMatch(stream, result.language, 'episodeTitle');
+        return true;
+      }
+
+      // A release names its episode in its own language, so a mismatch only
+      // means something when that language is among the known names.
+      const specificLanguages = (stream.parsedFile?.languages ?? []).filter(
+        (language) => !NON_SPECIFIC_LANGUAGES.includes(language)
+      );
+      const covered =
+        specificLanguages.length === 0 ||
+        specificLanguages.some((language) => {
+          const code = languageToCode(language)?.toLowerCase();
+          return code && expected.some((t) => t.language === code);
+        });
+      if (!covered) {
+        return undefined;
+      }
+      return false;
+    };
+
     const performTitleMatch = (stream: ParsedStream) => {
       const titleMatchingOptions = {
         mode: 'exact',
@@ -785,40 +867,96 @@ class StreamFilterer {
         );
       }
 
-      if (result.matched && result.language && stream.parsedFile) {
-        const lang = result.language.toLowerCase();
-        // Skip common languages where a title match doesn't reliably indicate
-        // the stream is in that language (English/Japanese titles are universal)
-        const isCommon = lang === 'en' || (isAnime && lang === 'ja');
+      if (!result.matched) {
+        return false;
+      }
 
-        // Don't infer language if the stream already carries a specific language tag.
-        // Unknown / Dual Audio / Multi / Dubbed are non-specific and don't count.
-        const nonSpecificLanguages = [
-          'Unknown',
-          'Dual Audio',
-          'Multi',
-          'Dubbed',
-        ];
-        const hasSpecificLanguage = stream.parsedFile.languages.some(
-          (l) => !nonSpecificLanguages.includes(l)
-        );
+      const streamCountry = normaliseCountryCode(stream.parsedFile?.country);
+      const requestedCountry = normaliseCountryCode(requestedMetadata.country);
+      if (
+        streamCountry &&
+        requestedCountry &&
+        streamCountry !== requestedCountry
+      ) {
+        return false;
+      }
 
-        if (!isCommon && !hasSpecificLanguage) {
-          const inferredLanguage = iso6391ToLanguage(lang);
-          if (
-            inferredLanguage &&
-            !stream.parsedFile.languages.includes(inferredLanguage) &&
-            LANGUAGES.includes(inferredLanguage as any)
-          ) {
-            stream.parsedFile.languages.push(inferredLanguage);
-            logger.debug(
-              `Inferred language "${inferredLanguage}" for stream "${stream.filename}" from matched title language (${lang})`
-            );
+      const conflicts = requestedMetadata.titleConflicts;
+      if (
+        titleMatchingOptions.ambiguousResults === 'discard' &&
+        conflicts?.length
+      ) {
+        // Release groups tag the newcomer, not the incumbent, so an untagged
+        // release belongs to the earliest show of that name.
+        const requestedIsOriginal =
+          requestedMetadata.year !== undefined &&
+          conflicts.every(
+            (conflict) =>
+              conflict.year === undefined ||
+              conflict.year >= requestedMetadata.year!
+          );
+        if (!requestedIsOriginal) {
+          const countryConfirms =
+            !!streamCountry && streamCountry === requestedCountry;
+          const yearConfirms = (() => {
+            const rawYear = stream.parsedFile?.year;
+            if (!rawYear) return false;
+            const start = parseInt(rawYear.split('-')[0]);
+            if (Number.isNaN(start)) return false;
+            const candidates = requestedMetadata.releaseYears?.length
+              ? requestedMetadata.releaseYears
+              : [requestedMetadata.year].filter(
+                  (year): year is number => year !== undefined
+                );
+            return candidates.some((year) => Math.abs(start - year) <= 1);
+          })();
+          const episodeTitleConfirms =
+            episodeTitleMatches(
+              stream,
+              this.userData.episodeTitleMatching?.similarityThreshold ?? 0.8
+            ) === true;
+          if (!countryConfirms && !yearConfirms && !episodeTitleConfirms) {
+            return false;
           }
         }
       }
 
-      return result.matched;
+      inferLanguageFromMatch(stream, result.language, 'title');
+
+      return true;
+    };
+
+    const performEpisodeTitleMatch = (stream: ParsedStream) => {
+      const episodeTitleMatchingOptions = {
+        similarityThreshold: 0.8,
+        ...(this.userData.episodeTitleMatching ?? {}),
+      };
+      if (!episodeTitleMatchingOptions.enabled) {
+        return true;
+      }
+      if (!requestedMetadata?.episodeTitles?.length) {
+        return true;
+      }
+      if (
+        episodeTitleMatchingOptions.requestTypes?.length &&
+        (!episodeTitleMatchingOptions.requestTypes.includes(type) ||
+          (isAnime &&
+            !episodeTitleMatchingOptions.requestTypes.includes('anime')))
+      ) {
+        return true;
+      }
+      if (
+        episodeTitleMatchingOptions.addons?.length &&
+        !episodeTitleMatchingOptions.addons.includes(stream.addon.preset.id)
+      ) {
+        return true;
+      }
+      return (
+        episodeTitleMatches(
+          stream,
+          episodeTitleMatchingOptions.similarityThreshold
+        ) !== false
+      );
     };
 
     const findYearInString = (string: string) => {
@@ -899,26 +1037,15 @@ class StreamFilterer {
       }
 
       if (!streamYear) {
-        // if no year is present, filter out if its a movie IF strict is true, keep otherwise
-        return type === 'movie' && yearMatchingOptions.strict ? false : true;
+        const strictTypes = yearMatchingOptions.strictTypes ?? ['movie'];
+        const strictApplies =
+          yearMatchingOptions.strict &&
+          (strictTypes.includes(type) ||
+            (isAnime && strictTypes.includes('anime')));
+        return strictApplies ? false : true;
       }
 
       // streamYear can be a string like "2004" or "2012-2020"
-      // Calculate the requested year range.
-      // When useInitialAirDate is enabled for series/anime, compare against
-      // only the initial air year instead of the full year range.
-      const useInitialOnly =
-        yearMatchingOptions.useInitialAirDate &&
-        (type === 'series' || type === 'anime');
-
-      let requestedYearRange: [number, number] = [
-        requestedMetadata.year,
-        requestedMetadata.year,
-      ];
-      if (requestedMetadata.yearEnd && !useInitialOnly) {
-        requestedYearRange[1] = requestedMetadata.yearEnd;
-      }
-
       // Calculate the stream year range
       let streamYearRange: [number, number];
       if (streamYear.includes('-')) {
@@ -933,11 +1060,41 @@ class StreamFilterer {
       const tolerance = yearMatchingOptions.tolerance ?? 1;
       streamYearRange[0] -= tolerance;
       streamYearRange[1] += tolerance;
-
-      // If the requested year range and stream year range overlap, accept the stream
-      const [requestedStart, requestedEnd] = requestedYearRange;
       const [streamStart, streamEnd] = streamYearRange;
-      return requestedStart <= streamEnd && requestedEnd >= streamStart;
+      const overlaps = (start: number, end: number) =>
+        start <= streamEnd && end >= streamStart;
+
+      const useInitialOnly =
+        yearMatchingOptions.useInitialAirDate &&
+        (type === 'series' || type === 'anime');
+
+      // Matched pointwise, since the whole run would also accept a same-name
+      // show that premiered partway through it. Multi-season packs are exempt,
+      // being often tagged with a season other than the requested one.
+      const releaseYears = requestedMetadata.releaseYears;
+      const spansMultipleSeasons =
+        (stream.parsedFile?.seasons?.length ?? 0) > 1;
+      if (
+        !useInitialOnly &&
+        !spansMultipleSeasons &&
+        type !== 'movie' &&
+        releaseYears?.length
+      ) {
+        const seasonYear = isAnime ? requestedMetadata.seasonYear : undefined;
+        return [...releaseYears, seasonYear]
+          .filter((year): year is number => year !== undefined)
+          .some((year) => overlaps(year, year));
+      }
+
+      let requestedYearRange: [number, number] = [
+        requestedMetadata.year,
+        requestedMetadata.year,
+      ];
+      if (requestedMetadata.yearEnd && !useInitialOnly) {
+        requestedYearRange[1] = requestedMetadata.yearEnd;
+      }
+
+      return overlaps(requestedYearRange[0], requestedYearRange[1]);
     };
 
     const performSeasonEpisodeMatch = (stream: ParsedStream) => {
@@ -2122,6 +2279,16 @@ class StreamFilterer {
         }
       }
 
+      if (!shouldPassthroughStage(stream, 'episode')) {
+        if (!performEpisodeTitleMatch(stream)) {
+          this.incrementRemovalReason(
+            'episodeTitleMatching',
+            `${stream.parsedFile?.title || 'Unknown Title'} - ${stream.parsedFile?.episodeTitle}`
+          );
+          return false;
+        }
+      }
+
       if (!shouldPassthroughStage(stream, 'title')) {
         const _tmStart = Date.now();
         const _tmResult = performTitleMatch(stream);
@@ -2129,7 +2296,7 @@ class StreamFilterer {
         if (!_tmResult) {
           this.incrementRemovalReason(
             'titleMatching',
-            `${stream.parsedFile?.title || 'Unknown Title'}${type === 'movie' ? ` - (${stream.parsedFile?.year || 'Unknown Year'})` : ''}`
+            `${stream.parsedFile?.title || 'Unknown Title'}${stream.parsedFile?.country ? ` (${stream.parsedFile.country})` : ''}${type === 'movie' ? ` - (${stream.parsedFile?.year || 'Unknown Year'})` : ''}`
           );
           return false;
         }

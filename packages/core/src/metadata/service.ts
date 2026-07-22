@@ -1,5 +1,11 @@
 ﻿import { DistributedLock } from '../utils/distributed-lock.js';
-import { Metadata, MetadataTitle } from './utils.js';
+import {
+  deduplicateTitles,
+  Metadata,
+  MetadataTitle,
+  TitleConflict,
+} from './utils.js';
+import { detectTitleConflicts } from './conflicts.js';
 import {
   assembleTitles,
   mergeMetadata,
@@ -237,6 +243,7 @@ export class MetadataService {
                 year: tmdbMetadata.year,
                 yearEnd: tmdbMetadata.yearEnd,
                 originalLanguage: tmdbMetadata.originalLanguage,
+                country: tmdbMetadata.country,
                 releaseDate: tmdbMetadata.releaseDate,
                 seasons: tmdbMetadata.seasons
                   ? [...tmdbMetadata.seasons].sort(
@@ -272,6 +279,7 @@ export class MetadataService {
                 lastAiredDate: tvdbMetadata.lastAiredDate,
                 firstAiredDate: tvdbMetadata.firstAiredDate,
                 originalLanguage: tvdbMetadata.originalLanguage,
+                country: tvdbMetadata.country,
                 tvdbId: tvdbMetadata.tvdbId,
               };
             } else if (tvdbResult.status === 'rejected') {
@@ -308,6 +316,7 @@ export class MetadataService {
                   : undefined,
                 year: sky.year,
                 originalLanguage: sky.originalLanguage,
+                country: sky.country,
                 seasons: sky.seasons,
                 genres: sky.genres,
                 runtime: sky.runtime,
@@ -436,6 +445,62 @@ export class MetadataService {
             const mediaType = type === 'movie' ? 'movie' : 'series';
             let merged = mergeMetadata(contributions, mediaType);
 
+            // series only: movie results carry a year already
+            let titleConflictsPromise: Promise<TitleConflict[]> | undefined;
+            if (
+              type === 'series' &&
+              appConfig.metadata.titleConflicts.enabled &&
+              merged.title
+            ) {
+              titleConflictsPromise = detectTitleConflicts({
+                title: merged.title,
+                year: merged.year,
+                country: merged.country,
+                tmdbId: merged.tmdbId,
+                tvdbId: merged.tvdbId,
+                tmdbAuth: {
+                  accessToken: this.config.tmdbAccessToken,
+                  apiKey: this.config.tmdbApiKey,
+                },
+                tvdbApiKey: this.config.tvdbApiKey,
+              }).catch((error) => {
+                logger.debug(
+                  `Title conflict detection failed for ${id.fullId}: ${error}`
+                );
+                return [];
+              });
+            }
+
+            // anime entries partition and renumber seasons
+            const mapEpisodeForTmdb = () => {
+              let seasonNumber = Number(id.season);
+              let episodeNumber = Number(id.episode);
+              if (animeEntry) {
+                const originalSeason = seasonNumber;
+                seasonNumber = animeEntry.tmdb?.seasonNumber ?? seasonNumber;
+                if (animeEntry.tmdb?.fromEpisode) {
+                  const fromEpisode = Number(animeEntry.tmdb.fromEpisode);
+                  if (
+                    seasonNumber !== originalSeason ||
+                    episodeNumber < fromEpisode
+                  ) {
+                    episodeNumber = fromEpisode + episodeNumber - 1;
+                  }
+                }
+              }
+              return { seasonNumber, episodeNumber };
+            };
+
+            const tvdbAvailable = !!(
+              this.config.tvdbApiKey || appConfig.metadata.tvdb.apiKey
+            );
+            const tmdbAvailable = !!(
+              this.config.tmdbAccessToken ||
+              this.config.tmdbApiKey ||
+              appConfig.metadata.tmdb.accessToken ||
+              appConfig.metadata.tmdb.apiKey
+            );
+
             if (
               !merged.nextAirDate &&
               type === 'series' &&
@@ -447,21 +512,7 @@ export class MetadataService {
                   accessToken: this.config.tmdbAccessToken,
                   apiKey: this.config.tmdbApiKey,
                 });
-                let seasonNumber = Number(id.season);
-                let episodeNumber = Number(id.episode);
-                if (animeEntry) {
-                  const originalSeason = seasonNumber;
-                  seasonNumber = animeEntry.tmdb?.seasonNumber ?? seasonNumber;
-                  if (animeEntry.tmdb?.fromEpisode) {
-                    const fromEpisode = Number(animeEntry.tmdb.fromEpisode);
-                    if (
-                      seasonNumber !== originalSeason ||
-                      episodeNumber < fromEpisode
-                    ) {
-                      episodeNumber = fromEpisode + episodeNumber - 1;
-                    }
-                  }
-                }
+                const { seasonNumber, episodeNumber } = mapEpisodeForTmdb();
                 if (merged.tmdbId && merged.seasons) {
                   const tmdbNextAirDate = await tmdb.getNextEpisodeAirDate(
                     Number(merged.tmdbId),
@@ -485,15 +536,6 @@ export class MetadataService {
             let episodeFacts: EpisodeResolution | undefined;
             if (type === 'series' && id.season && id.episode) {
               try {
-                const tvdbAvailable = !!(
-                  this.config.tvdbApiKey || appConfig.metadata.tvdb.apiKey
-                );
-                const tmdbAvailable = !!(
-                  this.config.tmdbAccessToken ||
-                  this.config.tmdbApiKey ||
-                  appConfig.metadata.tmdb.accessToken ||
-                  appConfig.metadata.tmdb.apiKey
-                );
                 const resolvedTvdbId = merged.tvdbId;
                 const resolvedTmdbId = merged.tmdbId;
                 episodeFacts = await resolveEpisodeFacts({
@@ -551,6 +593,113 @@ export class MetadataService {
               }
             }
 
+            // Sources name episodes differently (TMDB and Skyhook carry rival
+            // English translations, keyed TVDB the original language for
+            // anime) and release groups follow all of them, so collect all.
+            let episodeTitles: MetadataTitle[] | undefined;
+            let episodeYear: number | undefined;
+            let seasonYear: number | undefined;
+            if (type === 'series' && id.season && id.episode) {
+              const seasonNumber =
+                episodeFacts?.resolvedSeasonNumber ?? Number(id.season);
+              const episodeNumber = Number(id.episode);
+              const yearOf = (date?: string | null) => {
+                if (!date) return undefined;
+                const year = new Date(date).getFullYear();
+                return Number.isNaN(year) ? undefined : year;
+              };
+
+              const [tmdbEpisode, tvdbEpisodes, skyhookShow] =
+                await Promise.allSettled([
+                  tmdbAvailable && merged.tmdbId
+                    ? (() => {
+                        const mapped = mapEpisodeForTmdb();
+                        return new TMDBMetadata({
+                          accessToken: this.config.tmdbAccessToken,
+                          apiKey: this.config.tmdbApiKey,
+                        }).getEpisodeDetails(
+                          Number(merged.tmdbId),
+                          mapped.seasonNumber,
+                          mapped.episodeNumber
+                        );
+                      })()
+                    : Promise.resolve(undefined),
+                  tvdbAvailable && merged.tvdbId
+                    ? new TVDBMetadata({
+                        apiKey: this.config.tvdbApiKey,
+                      }).getSeasonEpisodes(Number(merged.tvdbId), seasonNumber)
+                    : Promise.resolve(undefined),
+                  merged.tvdbId
+                    ? new SkyhookMetadata().getShow(Number(merged.tvdbId))
+                    : Promise.resolve(null),
+                ]);
+
+              const names: MetadataTitle[] = [];
+              if (tmdbEpisode.status === 'fulfilled' && tmdbEpisode.value) {
+                names.push(...(tmdbEpisode.value.titles ?? []));
+                episodeYear ??= yearOf(tmdbEpisode.value.airDate);
+              }
+              if (tvdbEpisodes.status === 'fulfilled' && tvdbEpisodes.value) {
+                const episodes = tvdbEpisodes.value;
+                const match = episodes.find((e) => e.number === episodeNumber);
+                if (
+                  match?.name &&
+                  !names.some(
+                    (name) =>
+                      name.title.toLowerCase() === match.name!.toLowerCase()
+                  )
+                ) {
+                  names.push({ title: match.name });
+                }
+                episodeYear ??= yearOf(match?.aired);
+                for (const episode of episodes) {
+                  const year = yearOf(episode.aired);
+                  if (year && (seasonYear === undefined || year < seasonYear)) {
+                    seasonYear = year;
+                  }
+                }
+              }
+              if (skyhookShow.status === 'fulfilled' && skyhookShow.value) {
+                for (const episode of skyhookShow.value.episodes ?? []) {
+                  if (episode.seasonNumber !== seasonNumber) continue;
+                  const year = yearOf(episode.airDate);
+                  if (year && (seasonYear === undefined || year < seasonYear)) {
+                    seasonYear = year;
+                  }
+                  if (episode.episodeNumber !== episodeNumber) continue;
+                  if (episode.title) {
+                    names.push({ title: episode.title, language: 'en' });
+                  }
+                  episodeYear ??= year;
+                }
+              }
+              if (!seasonYear && cinemetaVideos?.length) {
+                for (const video of cinemetaVideos) {
+                  if (video.season !== seasonNumber || !video.released)
+                    continue;
+                  const year = yearOf(video.released);
+                  if (year && (seasonYear === undefined || year < seasonYear)) {
+                    seasonYear = year;
+                  }
+                }
+              }
+              if (names.length) episodeTitles = deduplicateTitles(names);
+            }
+
+            // Left empty unless a season or episode year resolved: the
+            // first-aired year alone cannot tell a mistagged release from a
+            // correctly tagged later season.
+            const releaseYears =
+              seasonYear !== undefined || episodeYear !== undefined
+                ? [
+                    ...new Set(
+                      [merged.year, seasonYear, episodeYear].filter(
+                        (year): year is number => year !== undefined
+                      )
+                    ),
+                  ]
+                : [];
+
             let sceneTitles: string[] | undefined;
             if (
               type === 'series' &&
@@ -593,12 +742,22 @@ export class MetadataService {
               throw new Error(`Could not find metadata for ${id.fullId}`);
             }
 
+            const titleConflicts = titleConflictsPromise
+              ? await titleConflictsPromise
+              : undefined;
+
             const metadata = {
               title: merged.title,
               titles: merged.titles,
               year: merged.year,
               yearEnd: merged.yearEnd,
               originalLanguage: merged.originalLanguage,
+              country: merged.country,
+              titleConflicts: titleConflicts?.length
+                ? titleConflicts
+                : undefined,
+              episodeTitles,
+              releaseYears: releaseYears.length ? releaseYears : undefined,
               seasons: merged.seasons,
               releaseDate: merged.releaseDate,
               tmdbId: merged.tmdbId,
@@ -625,6 +784,10 @@ export class MetadataService {
                 ),
                 seasons: metadata.seasons?.map(
                   (s) => `{s:${s.season_number},e:${s.episode_count}}`
+                ),
+                titleConflicts: metadata.titleConflicts?.map(
+                  (c) =>
+                    `${c.title} (${c.year ?? '?'}${c.country ? `, ${c.country}` : ''})`
                 ),
                 titleCount: merged.titleCandidateCount,
               }

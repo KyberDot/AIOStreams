@@ -16,6 +16,7 @@ export * from './header-presets.js';
 export * as constants from './constants.js';
 export * from './config.js';
 export * from './languages.js';
+export * from './countries.js';
 export * from './language-list.js';
 export * from './media-info.js';
 export * from './dsu.js';

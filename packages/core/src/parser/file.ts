@@ -58,9 +58,7 @@ function matchMultiplePatterns(
 }
 
 class FileParser {
-  private static parser = new Parser().addHandlers(
-    handlers.filter((handler) => handler.field !== 'country')
-  );
+  private static parser = new Parser().addHandlers(handlers);
 
   static parse(filename: string): ParsedFile {
     const parsed = this.parser.parse(filename);
@@ -124,6 +122,8 @@ class FileParser {
       filename.match(PARSE_REGEX.releaseGroup)?.[1] ?? parsed.group;
     const title = parsed.title;
     const year = parsed.year ? parsed.year.toString() : undefined;
+    const country = parsed.country;
+    const episodeTitle = parsed.episodeTitle;
 
     return {
       resolution,
@@ -137,6 +137,8 @@ class FileParser {
       releaseGroup,
       title,
       year,
+      country,
+      episodeTitle,
       subbed: parsed.subbed ?? false,
       dubbed: parsed.dubbed ?? false,
       editions: parsed.editions,

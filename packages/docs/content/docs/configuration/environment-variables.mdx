@@ -156,6 +156,12 @@ neither the environment variable nor a stored value is present.
 | `ID_MAPPINGS_MOVIE_URL`        | ID Mappings › Movie URL        | string   | `https://raw.githubusercontent.com/0xConstant1/Wikidata-Fetcher/main/data/movie_mappings.csv` | URL of the movie ID mapping CSV. _(restart required)_                                                                                                                                 |
 | `ID_MAPPINGS_REFRESH_INTERVAL` | ID Mappings › Refresh Interval | duration | `86400`                                                                                       | Refresh interval for the ID mapping dataset. _(restart required)_                                                                                                                     |
 
+#### Title Conflicts
+
+| Environment Variable      | UI Setting                | Type    | Default | Description                                                                                                                                                     |
+| ------------------------- | ------------------------- | ------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TITLE_CONFLICTS_ENABLED` | Title Conflicts › Enabled | boolean | `true`  | Detect same-name series (reboots and country variants, e.g. The Office UK vs US) via TMDB/TVDB search so queries and matching filters can disambiguate results. |
+
 #### Scene Mappings
 
 | Environment Variable              | UI Setting                        | Type     | Default                                      | Description                                                                                                                            |

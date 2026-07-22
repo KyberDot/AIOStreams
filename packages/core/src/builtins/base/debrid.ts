@@ -44,10 +44,12 @@ import {
   isPredominantlyLatin,
 } from '../utils/general.js';
 import { MetadataService } from '../../metadata/service.js';
-import { MetadataTitle } from '../../metadata/utils.js';
+import { MetadataTitle, TitleConflict } from '../../metadata/utils.js';
+import { stripTitleDisambiguators } from '../../metadata/conflicts.js';
+import { countryToReleaseTag } from '../../utils/countries.js';
 import type { Logger } from '../../logging/logger.js';
 import pLimit from 'p-limit';
-import { cleanTitle } from '../../parser/utils.js';
+import { cleanTitle, normaliseTitle } from '../../parser/utils.js';
 import { NzbDavConfig, NzbDAVService } from '../../debrid/nzbdav.js';
 import { AltmountConfig, AltmountService } from '../../debrid/altmount.js';
 import { formatHours } from '../../formatters/utils.js';
@@ -71,6 +73,7 @@ export interface SearchMetadata extends TitleMetadata {
   resolvedSeasonFirstEpisode?: number;
   /** Scene-mapping search titles, best (non-identity) first. */
   sceneTitles?: string[];
+  titleConflicts?: TitleConflict[];
 }
 
 export const BaseDebridConfigSchema = z.object({
@@ -407,6 +410,7 @@ export abstract class BaseDebridAddon<T extends BaseDebridConfig> {
       titles: searchMetadata.titles,
       year: searchMetadata.year,
       seasonYear: searchMetadata.seasonYear,
+      country: searchMetadata.country,
       season: searchMetadata.season,
       episode: searchMetadata.episode,
       absoluteEpisode: searchMetadata.absoluteEpisode,
@@ -544,6 +548,59 @@ export abstract class BaseDebridAddon<T extends BaseDebridConfig> {
         `${titlePlaceholder}${metadata.year ? ` ${metadata.year}` : ''}`
       );
     } else if (parsedId.mediaType === 'series' && addSeasonEpisode) {
+      // Same-name shows are told apart in release names by scene alias
+      // year, or country tag, so query those alongside the plain titles.
+      const normSeen = new Set(titles.map((t) => normaliseTitle(t)));
+      const variantTitles: string[] = [];
+      const addVariant = (title: string) => {
+        const cleaned = cleanTitle(title);
+        const norm = normaliseTitle(cleaned);
+        if (!norm || normSeen.has(norm)) return;
+        normSeen.add(norm);
+        variantTitles.push(cleaned);
+      };
+      const primarySelected = metadata.primaryTitle
+        ? normSeen.has(normaliseTitle(metadata.primaryTitle))
+        : false;
+      if (primarySelected) {
+        for (const alias of metadata.sceneTitles ?? []) {
+          if (variantTitles.length >= 2) break;
+          addVariant(alias);
+        }
+      }
+      if (metadata.titleConflicts?.length) {
+        const rawPrimary = metadata.titles?.[0];
+        if (primarySelected && rawPrimary) {
+          addVariant(stripTitleDisambiguators(rawPrimary));
+        }
+        if (!variantTitles.length) {
+          const year = metadata.year;
+          if (
+            year &&
+            metadata.titleConflicts.some((c) => c.year && c.year < year)
+          ) {
+            // year tagging is language-agnostic
+            for (const title of titles.slice(0, 2)) {
+              addVariant(`${title} ${year}`);
+            }
+          }
+          const tag = countryToReleaseTag(metadata.country);
+          if (
+            primarySelected &&
+            tag &&
+            metadata.titleConflicts.some(
+              (c) => c.country && c.country !== metadata.country
+            )
+          ) {
+            // country tags attach to the canonical name only
+            addVariant(`${metadata.primaryTitle} ${tag}`);
+          }
+        }
+      }
+      const seriesTitles = variantTitles.length
+        ? [...titles, ...variantTitles]
+        : titles;
+
       // season numbers are meaningless in release names when episodes are
       // numbered continuously across seasons
       const continuousAbsolute = (metadata.resolvedSeasonFirstEpisode ?? 1) > 1;
@@ -554,18 +611,21 @@ export abstract class BaseDebridAddon<T extends BaseDebridConfig> {
         (parsedId.episode ? Number(parsedId.episode) < 100 : true)
       ) {
         addQuery(
-          `${titlePlaceholder} S${parsedId.season!.toString().padStart(2, '0')}`
+          `${titlePlaceholder} S${parsedId.season!.toString().padStart(2, '0')}`,
+          seriesTitles
         );
       }
       if (metadata.absoluteEpisode) {
         addQuery(
           metadata.isAnime
             ? `${titlePlaceholder} ${metadata.absoluteEpisode!.toString().padStart(2, '0')}`
-            : `${titlePlaceholder} E${metadata.absoluteEpisode!.toString().padStart(2, '0')}`
+            : `${titlePlaceholder} E${metadata.absoluteEpisode!.toString().padStart(2, '0')}`,
+          seriesTitles
         );
       } else if (parsedId.episode && !parsedId.season) {
         addQuery(
-          `${titlePlaceholder} E${parsedId.episode!.toString().padStart(2, '0')}`
+          `${titlePlaceholder} E${parsedId.episode!.toString().padStart(2, '0')}`,
+          seriesTitles
         );
       }
       if (
@@ -576,12 +636,14 @@ export abstract class BaseDebridAddon<T extends BaseDebridConfig> {
         )
       ) {
         addQuery(
-          `${titlePlaceholder} ${metadata.relativeAbsoluteEpisode!.toString().padStart(2, '0')}`
+          `${titlePlaceholder} ${metadata.relativeAbsoluteEpisode!.toString().padStart(2, '0')}`,
+          seriesTitles
         );
       }
       if (parsedId.season && parsedId.episode && !continuousAbsolute) {
         addQuery(
-          `${titlePlaceholder} S${parsedId.season!.toString().padStart(2, '0')}E${parsedId.episode!.toString().padStart(2, '0')}`
+          `${titlePlaceholder} S${parsedId.season!.toString().padStart(2, '0')}E${parsedId.episode!.toString().padStart(2, '0')}`,
+          seriesTitles
         );
       }
       // date-based releases are named by air date
@@ -770,6 +832,8 @@ export abstract class BaseDebridAddon<T extends BaseDebridConfig> {
       episodeAirDate: metadata.episodeAirDate,
       resolvedSeasonFirstEpisode: metadata.resolvedSeasonFirstEpisode,
       sceneTitles: metadata.sceneTitles,
+      country: metadata.country,
+      titleConflicts: metadata.titleConflicts,
     };
 
     this.logger.debug(

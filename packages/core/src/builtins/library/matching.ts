@@ -9,6 +9,7 @@ import {
   UnprocessedTorrent,
   DebridDownload,
   getDebridService,
+  isCountryWrong,
   isTorrentDebridService,
   isUsenetDebridService,
 } from '../../debrid/index.js';
@@ -42,6 +43,10 @@ export function isItemMatch(
       threshold: TITLE_MATCH_THRESHOLD,
     })
   ) {
+    return false;
+  }
+
+  if (isCountryWrong(parsed, metadata)) {
     return false;
   }
 

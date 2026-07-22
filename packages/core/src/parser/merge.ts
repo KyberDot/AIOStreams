@@ -21,6 +21,8 @@ function richerParsedFile(
   const importantFields: (keyof ParsedFile)[] = [
     'title',
     'year',
+    'country',
+    'episodeTitle',
     'seasons',
     'episodes',
     'resolution',
@@ -88,6 +90,8 @@ export function mergeParsedFiles(
   return {
     title: richest?.title || folderParsed?.title || fileParsed?.title,
     year: fileParsed?.year || folderParsed?.year,
+    country: fileParsed?.country || folderParsed?.country,
+    episodeTitle: fileParsed?.episodeTitle || folderParsed?.episodeTitle,
     folderSeasons:
       seasons !== folderParsed?.seasons ? folderParsed?.seasons : undefined,
     folderEpisodes:

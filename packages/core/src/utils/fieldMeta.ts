@@ -193,6 +193,8 @@ export const FIELD_META: Omit<Record<keyof UserData, FieldMeta>, IgnoredKeys> = 
   titleMatching: { label: 'Title Matching', group: 'filters', type: 'scalar', menu: 'filters', subTab: 'matching' },
   yearMatching: { label: 'Year Matching', group: 'filters', type: 'scalar', menu: 'filters', subTab: 'matching' },
   seasonEpisodeMatching: { label: 'Season/Episode Matching', group: 'filters', type: 'scalar', menu: 'filters', subTab: 'matching' },
+  episodeTitleMatching: { label: 'Episode Title Matching', group: 'filters', type: 'scalar', menu: 'filters', subTab: 'matching' },
+  languageInference: { label: 'Language Inference', group: 'filters', type: 'scalar', menu: 'filters', subTab: 'matching' },
 
   sortCriteria: { label: 'Sort Criteria', group: 'sorting', type: 'scalar', menu: 'sorting' },
   deduplicator: { label: 'Deduplicator', group: 'sorting', type: 'scalar', menu: 'filters', subTab: 'deduplicator' },

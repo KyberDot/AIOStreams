@@ -17,6 +17,7 @@ import {
   isSeasonWrong,
   isEpisodeWrong,
   isTitleWrong,
+  isCountryWrong,
   DebridDownload,
   isNotVideoFile,
   isTorrentDebridService,
@@ -293,6 +294,10 @@ async function processTorrentsForDebridService(
         titleCache.set(parsedTitleKey, preprocessedTitle);
       }
       if (torrent.confirmed !== true) {
+        if (isCountryWrong(parsedTorrent, metadata)) {
+          filteredTitle++;
+          continue;
+        }
         if (normTitles !== null) {
           const normParsed = normaliseTitle(preprocessedTitle);
           const exactMatch = normTitles.has(normParsed);
@@ -439,6 +444,9 @@ export async function processTorrentsForP2P(
   for (const torrent of torrents) {
     const parsedTorrent = parsedTitlesMap.get(torrent.title ?? '');
     if (metadata && parsedTorrent) {
+      if (isCountryWrong(parsedTorrent, metadata)) {
+        continue;
+      }
       if (isSeasonWrong(parsedTorrent, metadata)) {
         continue;
       }
@@ -676,6 +684,9 @@ async function processNZBsForDebridService(
         titleCache.set(parsedTitleKey, preprocessedTitle);
       }
       if (nzb.confirmed !== true) {
+        if (isCountryWrong(parsedNzb, metadata)) {
+          continue;
+        }
         if (normTitles !== null) {
           const normParsed = normaliseTitle(preprocessedTitle);
           const exactMatch = normTitles.has(normParsed);

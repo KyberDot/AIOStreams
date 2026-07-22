@@ -742,6 +742,7 @@ export const UserDataSchema = z.object({
       enabled: z.boolean().optional(),
       tolerance: z.number().min(0).max(100).optional(),
       strict: z.boolean().optional(),
+      strictTypes: z.array(z.string()).optional(),
       useInitialAirDate: z.boolean().optional(),
       requestTypes: z.array(z.string()).optional(),
       addons: z.array(z.string()).optional(),
@@ -754,6 +755,7 @@ export const UserDataSchema = z.object({
       yearTolerance: z.number().min(0).max(100).optional(),
       similarityThreshold: z.number().min(0).max(1).optional(),
       enabled: z.boolean().optional(),
+      ambiguousResults: z.enum(['keep', 'discard']).optional(),
       requestTypes: z.array(z.string()).optional(),
       addons: z.array(z.string()).optional(),
     })
@@ -764,6 +766,20 @@ export const UserDataSchema = z.object({
       strict: z.boolean().optional(),
       requestTypes: z.array(z.string()).optional(),
       addons: z.array(z.string()).optional(),
+    })
+    .optional(),
+  episodeTitleMatching: z
+    .object({
+      enabled: z.boolean().optional(),
+      similarityThreshold: z.number().min(0).max(1).optional(),
+      requestTypes: z.array(z.string()).optional(),
+      addons: z.array(z.string()).optional(),
+    })
+    .optional(),
+  languageInference: z
+    .object({
+      enabled: z.boolean().optional(),
+      sources: z.array(z.enum(['title', 'episodeTitle'])).optional(),
     })
     .optional(),
   deduplicator: DeduplicatorOptions.optional(),
@@ -1020,6 +1036,8 @@ export const ParsedFileSchema = z.object({
   dubbed: z.boolean().optional(),
   title: z.string().optional(),
   year: z.coerce.string().optional(),
+  country: z.string().optional(),
+  episodeTitle: z.string().optional(),
   seasons: z.array(z.number()).optional(),
   volumes: z.array(z.number()).optional(),
   folderSeasons: z.array(z.number()).optional(),

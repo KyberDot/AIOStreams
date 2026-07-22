@@ -121,6 +121,7 @@ Modifiers are chained with `::`:
 | ----------------------- | -------- | ---------------------------------------- |
 | `{stream.title}`        | string   | Media title extracted from filename      |
 | `{stream.year}`         | string   | Year extracted from filename             |
+| `{stream.country}`      | string   | Country tag from the release name (e.g. `UK`, `US`) |
 | `{stream.date}`         | string   | Date extracted from filename             |
 | `{stream.releaseGroup}` | string   | Name of the release group                |
 | `{stream.editions}`     | string[] | Special editions (e.g. `Director's Cut`) |
@@ -145,6 +146,7 @@ Modifiers are chained with `::`:
 | `{stream.folderEpisodes}`          | number[] | Episodes from folder name (when different from filename)     |
 | `{stream.formattedFolderEpisodes}` | string   | Formatted episodes from folder name                          |
 | `{stream.seasonEpisode}`           | string[] | Pre-formatted season/episode strings (e.g. `['S01', 'E05']`) |
+| `{stream.episodeTitle}`            | string   | Episode title parsed from the release name                   |
 
 #### P2P / Tracker
 

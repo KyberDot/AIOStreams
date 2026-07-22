@@ -480,6 +480,12 @@ function removeInvalidPresetReferences(config: UserData) {
         existingPresetIds?.includes(addon)
       );
   }
+  if (config.episodeTitleMatching) {
+    config.episodeTitleMatching.addons =
+      config.episodeTitleMatching.addons?.filter((addon) =>
+        existingPresetIds?.includes(addon)
+      );
+  }
   if (config.groups?.groupings) {
     config.groups.groupings = config.groups.groupings.map((group) => ({
       ...group,
@@ -1433,7 +1439,8 @@ const FILTER_FIELDS: (keyof UserData)[] = [
   'excludeUncachedFromStreamTypes', 'excludeUncachedMode',
   'excludeSeederRange', 'includeSeederRange', 'requiredSeederRange', 'seederRangeTypes',
   'excludeAgeRange', 'includeAgeRange', 'requiredAgeRange', 'ageRangeTypes',
-  'digitalReleaseFilter', 'size', 'bitrate', 'titleMatching', 'yearMatching', 'seasonEpisodeMatching'
+  'digitalReleaseFilter', 'size', 'bitrate', 'titleMatching', 'yearMatching', 'seasonEpisodeMatching', 'episodeTitleMatching',
+  'languageInference'
 ];
 
 // prettier-ignore

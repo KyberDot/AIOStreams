@@ -2,6 +2,7 @@
 import { Cache, appConfig, formatZodError, ParsedId } from '../utils/index.js';
 import { Metadata, MetadataTitle } from './utils.js';
 import { iso6392ToIso6391 } from '../utils/languages.js';
+import { normaliseCountryCode } from '../utils/countries.js';
 import { makeRequest } from '../utils/http.js';
 import { z, ZodError } from 'zod';
 
@@ -145,12 +146,15 @@ const TVDBSeasonEpisodeSchema = z.looseObject({
   number: z.number().optional(),
   seasonNumber: z.number().optional(),
   aired: z.string().nullable().optional(),
+  name: z.string().nullable().optional(),
 });
 
 export interface TVDBSeasonEpisode {
   number: number;
   seasonNumber: number;
   aired: string | null;
+  /** Episode name in the series' default language (original for anime). */
+  name?: string;
 }
 
 const SeriesEpisodesResponseSchema = z.discriminatedUnion('status', [
@@ -166,6 +170,25 @@ const SeriesEpisodesResponseSchema = z.discriminatedUnion('status', [
   }),
   TVDBErrorSchema,
 ]);
+
+const SearchResultSchema = z.looseObject({
+  tvdb_id: z.string().optional(),
+  name: z.string().optional(),
+  year: z.string().nullable().optional(),
+  country: z.string().nullable().optional(),
+});
+
+const SearchResponseSchema = z.discriminatedUnion('status', [
+  TVDBSuccessSchema(z.array(SearchResultSchema)),
+  TVDBErrorSchema,
+]);
+
+export interface TVDBSeriesSearchResult {
+  tvdbId: number;
+  name: string;
+  year?: number;
+  country?: string;
+}
 
 const SeriesTranslationResponseSchema = z.discriminatedUnion('status', [
   z.object({
@@ -250,6 +273,23 @@ export class TVDBMetadata {
     }
   }
 
+  public async searchSeries(query: string): Promise<TVDBSeriesSearchResult[]> {
+    await this.ensureToken();
+    const results = await this.api.search(query, 'series');
+    return results
+      .filter((r) => r.tvdb_id && r.name)
+      .map((r) => {
+        const year = r.year ? parseInt(r.year) : undefined;
+        return {
+          tvdbId: parseInt(r.tvdb_id!),
+          name: r.name!,
+          year: year && !Number.isNaN(year) ? year : undefined,
+          country: normaliseCountryCode(r.country),
+        };
+      })
+      .filter((r) => !Number.isNaN(r.tvdbId));
+  }
+
   public async getMetadata(id: ParsedId): Promise<Metadata> {
     if (!['imdbId', 'themoviedbId', 'thetvdbId'].includes(id.type)) {
       throw new Error(`Invalid ID type: ${id.type}`);
@@ -330,6 +370,7 @@ export class TVDBMetadata {
           originalLanguage: series.originalLanguage
             ? iso6392ToIso6391(series.originalLanguage) || undefined
             : undefined,
+          country: normaliseCountryCode(series.originalCountry),
         };
       } else {
         throw new Error(`Could not find metadata for ${id.value}`);
@@ -383,6 +424,7 @@ export class TVDBMetadata {
           originalLanguage: series.originalLanguage
             ? iso6392ToIso6391(series.originalLanguage) || undefined
             : undefined,
+          country: normaliseCountryCode(series.originalCountry),
         };
       }
     }
@@ -404,6 +446,8 @@ class TVDBApi {
     ),
     // prettier-ignore
     remoteId: Cache.getInstance<string, z.infer<typeof RemoteIdSearchResponseSchema>>('tvdb:remoteId'),
+    // prettier-ignore
+    search: Cache.getInstance<string, z.infer<typeof SearchResultSchema>[]>('tvdb:search'),
     // prettier-ignore
     seriesEpisodes: Cache.getInstance<string, TVDBSeasonEpisode[]>('tvdb:seriesEpisodes'),
     seriesTranslation: Cache.getInstance<string, string | null>(
@@ -473,6 +517,26 @@ class TVDBApi {
     );
   }
 
+  public async search(
+    query: string,
+    type: 'series' | 'movie'
+  ): Promise<z.infer<typeof SearchResultSchema>[]> {
+    return this.cache.search.wrap(
+      async () => {
+        logger.debug(`Searching TVDB: ${query} (${type})`);
+        const response = await this.request<
+          z.infer<typeof SearchResponseSchema>
+        >(`/search?query=${encodeURIComponent(query)}&type=${type}`, {
+          schema: SearchResponseSchema,
+          timeout: 5000,
+        });
+        return response.status === 'success' ? response.data : [];
+      },
+      `${type}:${query.toLowerCase()}`,
+      7 * 24 * 60 * 60 // 7 days
+    );
+  }
+
   public async getSeries(
     id: number
   ): Promise<z.infer<typeof SeriesResponseSchema>> {
@@ -522,6 +586,7 @@ class TVDBApi {
               number: ep.number,
               seasonNumber: ep.seasonNumber,
               aired: ep.aired ?? null,
+              name: ep.name ?? undefined,
             });
           }
           if (!response.links?.next) break;

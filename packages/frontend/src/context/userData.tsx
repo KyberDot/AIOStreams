@@ -352,6 +352,12 @@ export function removeInvalidPresetReferences(config: UserData) {
         existingPresetIds?.includes(addon)
       );
   }
+  if (config.episodeTitleMatching) {
+    config.episodeTitleMatching.addons =
+      config.episodeTitleMatching.addons?.filter((addon) =>
+        existingPresetIds?.includes(addon)
+      );
+  }
   if (config.groups?.groupings) {
     config.groups.groupings = config.groups.groupings.map((group) => ({
       ...group,
@@ -483,6 +489,14 @@ export const DefaultUserData: UserData = {
   seasonEpisodeMatching: {
     addons: [],
     requestTypes: [],
+  },
+  episodeTitleMatching: {
+    addons: [],
+    requestTypes: [],
+  },
+  languageInference: {
+    enabled: true,
+    sources: [],
   },
   yearMatching: {
     addons: [],

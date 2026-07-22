@@ -946,6 +946,7 @@ export const SMART_DETECT_ATTRIBUTES = [
   'languages',
   'repack',
   'proper',
+  'country',
 ] as const;
 
 export type SmartDetectAttribute = (typeof SMART_DETECT_ATTRIBUTES)[number];
@@ -1598,6 +1599,11 @@ export const SNIPPETS = [
     name: 'Release Group',
     description: 'The release group.',
     value: '{?🏷️ {stream.releaseGroup}?}',
+  },
+  {
+    name: 'Episode Title',
+    description: 'The episode title parsed from the release name.',
+    value: '{?📺 {stream.episodeTitle}?}',
   },
   {
     name: 'Indexer',

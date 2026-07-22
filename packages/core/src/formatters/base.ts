@@ -102,6 +102,8 @@ export interface ParseValue {
     indexer: string | null;
     year: string | null;
     title: string | null;
+    country: string | null;
+    episodeTitle: string | null;
     date: string | null;
     folderSeasons: number[] | null;
     formattedFolderSeasons: string | null;
@@ -559,6 +561,8 @@ export abstract class BaseFormatter {
         year: stream.parsedFile?.year || null,
         type: stream.type || null,
         title: stream.parsedFile?.title || null,
+        country: stream.parsedFile?.country || null,
+        episodeTitle: stream.parsedFile?.episodeTitle || null,
         date: stream.parsedFile?.date || null,
         season: stream.parsedFile?.seasons?.[0] || null,
         formattedSeasons: formattedSeasonString || null,
