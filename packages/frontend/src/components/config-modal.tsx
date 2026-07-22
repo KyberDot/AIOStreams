@@ -25,6 +25,7 @@ export function ConfigModal({
   const [uuid, setUuidInput] = React.useState(initialUuid || '');
   const [password, setPasswordInput] = React.useState('');
   const [loading, setLoading] = React.useState(false);
+  const passwordRef = React.useRef<HTMLInputElement>(null);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -67,7 +68,19 @@ export function ConfigModal({
   };
 
   return (
-    <Modal open={open} onOpenChange={onOpenChange} title="Load Configuration">
+    <Modal
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Load Configuration"
+      onOpenAutoFocus={
+        initialUuid
+          ? (e) => {
+              e.preventDefault();
+              passwordRef.current?.focus();
+            }
+          : undefined
+      }
+    >
       <form onSubmit={handleSubmit} className="space-y-4">
         <TextInput
           label="UUID"
@@ -84,6 +97,7 @@ export function ConfigModal({
           className={initialUuid ? 'opacity-50' : undefined}
         />
         <PasswordInput
+          ref={passwordRef}
           label="Password"
           id="password"
           name="password"
