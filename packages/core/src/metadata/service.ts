@@ -363,21 +363,29 @@ export class MetadataService {
               }
 
               if (cinemetaData.videos) {
+                const episodeIndex = (video: {
+                  episode?: number | null;
+                }): number | undefined => {
+                  if (typeof video.episode === 'number') return video.episode;
+                  const n = (video as { number?: unknown }).number;
+                  return typeof n === 'number' ? n : undefined;
+                };
                 cinemetaVideos = cinemetaData.videos.map((video) => ({
                   season: video.season,
-                  episode: video.episode,
+                  episode: episodeIndex(video),
                   released: video.released,
                 }));
                 const seasonMap = new Map<number, Set<number>>();
                 for (const video of cinemetaData.videos) {
+                  const episode = episodeIndex(video);
                   if (
                     typeof video.season === 'number' &&
-                    typeof video.episode === 'number'
+                    episode !== undefined
                   ) {
                     if (!seasonMap.has(video.season)) {
                       seasonMap.set(video.season, new Set());
                     }
-                    seasonMap.get(video.season)!.add(video.episode);
+                    seasonMap.get(video.season)!.add(episode);
                   }
                 }
                 const imdbSeasons = Array.from(seasonMap.entries()).map(
