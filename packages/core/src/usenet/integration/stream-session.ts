@@ -113,12 +113,37 @@ const openingSessions = new Map<string, Promise<UsenetStreamSession>>();
 /** Idle TTL for a warm session; comfortably below the 5-min engine idle evict. */
 const STREAM_SESSION_IDLE_MS = 90_000;
 
+/**
+ * Serve-path guard for a release that is definitively unstreamable right now.
+ */
+const failingStreams = new Map<string, number>();
+const FAILING_STREAM_TTL_MS = 30_000;
+
+/** True while `key` is inside its post-failure cooldown. */
+function isStreamFailing(key: string): boolean {
+  const exp = failingStreams.get(key);
+  if (exp === undefined) return false;
+  if (exp <= Date.now()) {
+    failingStreams.delete(key);
+    return false;
+  }
+  return true;
+}
+
+/** Whether an error is a definitive "dead on every provider" verdict. */
+function isDefinitiveMiss(err: unknown): boolean {
+  return err instanceof ArticleNotFoundError && err.allProviders;
+}
+
 const sessionEvictionTimer = setInterval(() => {
   const now = Date.now();
   for (const [key, session] of streamSessions) {
     if (now - session.lastUsedAt > STREAM_SESSION_IDLE_MS) {
       streamSessions.delete(key);
     }
+  }
+  for (const [key, exp] of failingStreams) {
+    if (exp <= now) failingStreams.delete(key);
   }
   pruneStreamActivity(now);
 }, 30_000);
@@ -582,6 +607,21 @@ export async function openNativeUsenetStream(opts: {
     });
   }
 
+  const sessionKey = streamSessionKey(decoded);
+  if (isStreamFailing(sessionKey)) {
+    throw new DebridError(
+      'this release is currently unstreamable (data missing on every provider)',
+      {
+        statusCode: 503,
+        statusText: 'Service Unavailable',
+        code: 'SERVICE_UNAVAILABLE',
+        headers: {},
+        body: null,
+        type: 'api_error',
+      }
+    );
+  }
+
   noteStreamActivity(decoded.hash);
   const session = await getStreamSession(decoded, providers, options);
   opts.signal?.throwIfAborted();
@@ -601,6 +641,12 @@ export async function openNativeUsenetStream(opts: {
   }
   if (opts.signal) addAbortSignal(opts.signal, stream);
   stream.once('close', () => noteStreamActivity(session.hash));
+
+  stream.once('error', (err) => {
+    if (isDefinitiveMiss(err)) {
+      failingStreams.set(sessionKey, Date.now() + FAILING_STREAM_TTL_MS);
+    }
+  });
 
   return {
     stream,
