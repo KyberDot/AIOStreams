@@ -617,9 +617,7 @@ export abstract class BaseDebridAddon<T extends BaseDebridConfig> {
       }
       if (metadata.absoluteEpisode) {
         addQuery(
-          metadata.isAnime
-            ? `${titlePlaceholder} ${metadata.absoluteEpisode!.toString().padStart(2, '0')}`
-            : `${titlePlaceholder} E${metadata.absoluteEpisode!.toString().padStart(2, '0')}`,
+          `${titlePlaceholder} ${metadata.absoluteEpisode!.toString().padStart(2, '0')}`,
           seriesTitles
         );
       } else if (parsedId.episode && !parsedId.season) {
