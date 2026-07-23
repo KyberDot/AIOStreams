@@ -14,7 +14,7 @@ import {
   LocalSegmentFetcher,
   awaitAbortable,
 } from '../nntp/segment-fetcher.js';
-import { NntpError } from '../nntp/errors.js';
+import { ArticleNotFoundError, NntpError } from '../nntp/errors.js';
 import {
   CommandPriority,
   EngineOptions,
@@ -45,6 +45,13 @@ interface SharedFlight {
 }
 
 /**
+ * TTL for the negative-miss cache
+ */
+const MISS_TTL_MS = 60_000;
+/** Max distinct missing message-ids remembered (insertion-order eviction). */
+const MISS_CACHE_MAX = 16_384;
+
+/**
  * Coordinates segment fetches: owns the segment cache, single-flight de-dupe and
  * the global (prioritised) download budget, and delegates the actual
  * connection-owning work (provider failover + yEnc decode) to a
@@ -67,6 +74,11 @@ export class MultiProviderPool {
    */
   private onWireCount = 0;
 
+  /**
+   * Negative cache of definitive all-providers misses
+   */
+  private missCache = new Map<string, number>();
+
   /** The pinned decoded-body tier (owned by the segment cache). */
   private get arena(): SegmentArena {
     return this.cache.arena;
@@ -88,6 +100,37 @@ export class MultiProviderPool {
         this.onWireCount--;
       },
     };
+  }
+
+  /** Whether `messageId` is a non-expired all-providers miss. */
+  private isMissCached(messageId: string): boolean {
+    const exp = this.missCache.get(messageId);
+    if (exp === undefined) return false;
+    if (exp <= Date.now()) {
+      this.missCache.delete(messageId);
+      return false;
+    }
+    return true;
+  }
+
+  /** Record `messageId` as missing on every provider (bounded, TTL'd). */
+  private recordMiss(messageId: string): void {
+    if (
+      this.missCache.size >= MISS_CACHE_MAX &&
+      !this.missCache.has(messageId)
+    ) {
+      const oldest = this.missCache.keys().next().value;
+      if (oldest !== undefined) this.missCache.delete(oldest);
+    }
+    this.missCache.set(messageId, Date.now() + MISS_TTL_MS);
+  }
+
+  /** A fresh all-providers {@link ArticleNotFoundError} for a cached miss. */
+  private cachedMissError(messageId: string): ArticleNotFoundError {
+    return new ArticleNotFoundError(
+      `article not found on any provider (cached): ${messageId}`,
+      { messageId, allProviders: true }
+    );
   }
 
   constructor(
@@ -152,6 +195,9 @@ export class MultiProviderPool {
     if (hit) return Promise.resolve(hit);
     if (signal?.aborted) {
       return Promise.reject(new NntpError('connection', 'aborted'));
+    }
+    if (this.isMissCached(id)) {
+      return Promise.reject(this.cachedMissError(id));
     }
 
     let flight = this.sharedInflight.get(id);
@@ -295,6 +341,9 @@ export class MultiProviderPool {
         pinned.release();
       }
     }
+    if (this.isMissCached(segment.messageId)) {
+      throw this.cachedMissError(segment.messageId);
+    }
     // Disk hits return owned bodies (fresh deserialize) and ignore `out`.
     const fromDisk = await this.cache.getAsync(segment.messageId);
     if (fromDisk) return fromDisk;
@@ -338,6 +387,12 @@ export class MultiProviderPool {
       // bodies must skip the mem tier (see SegmentCache.set).
       this.cache.set(segment.messageId, data, { skipMem: out !== undefined });
       return data;
+    } catch (err) {
+      // Negatively cache only a definitive all-providers miss
+      if (err instanceof ArticleNotFoundError && err.allProviders) {
+        this.recordMiss(segment.messageId);
+      }
+      throw err;
     } finally {
       wire.end();
       releaseGlobal();
