@@ -296,6 +296,8 @@ export class NewznabAddon extends BaseNabAddon<NewznabAddonConfig, NewznabApi> {
   }
 
   private getEnclosure(result: any) {
-    return result.enclosure.find((e: any) => e.type === 'application/x-nzb');
+    return result.enclosure?.find((e: any) =>
+      e.type?.toLowerCase().includes('nzb')
+    );
   }
 }
