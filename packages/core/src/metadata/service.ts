@@ -199,7 +199,7 @@ export class MetadataService {
               promises.push(Promise.resolve(undefined));
             }
 
-            if (tvdbId) {
+            if (tvdbId && type !== 'movie') {
               promises.push(new SkyhookMetadata().getMetadata(tvdbId));
             } else {
               promises.push(Promise.resolve(undefined));
