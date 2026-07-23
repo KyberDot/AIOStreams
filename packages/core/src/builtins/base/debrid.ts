@@ -548,8 +548,6 @@ export abstract class BaseDebridAddon<T extends BaseDebridConfig> {
         `${titlePlaceholder}${metadata.year ? ` ${metadata.year}` : ''}`
       );
     } else if (parsedId.mediaType === 'series' && addSeasonEpisode) {
-      // Same-name shows are told apart in release names by scene alias
-      // year, or country tag, so query those alongside the plain titles.
       const normSeen = new Set(titles.map((t) => normaliseTitle(t)));
       const variantTitles: string[] = [];
       const addVariant = (title: string) => {
@@ -562,12 +560,6 @@ export abstract class BaseDebridAddon<T extends BaseDebridConfig> {
       const primarySelected = metadata.primaryTitle
         ? normSeen.has(normaliseTitle(metadata.primaryTitle))
         : false;
-      if (primarySelected) {
-        for (const alias of metadata.sceneTitles ?? []) {
-          if (variantTitles.length >= 2) break;
-          addVariant(alias);
-        }
-      }
       if (metadata.titleConflicts?.length) {
         const rawPrimary = metadata.titles?.[0];
         if (primarySelected && rawPrimary) {
