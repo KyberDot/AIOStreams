@@ -41,6 +41,7 @@ import {
   useConfirmationDialog,
 } from '../shared/confirmation-dialog';
 import { UserData } from '@aiostreams/core';
+import { redactPresetOptions } from '@/lib/preset-credentials';
 import { useSave } from '@/context/save';
 import { FiExternalLink } from 'react-icons/fi';
 
@@ -1448,14 +1449,7 @@ function Content() {
         );
         return {
           ...preset,
-          options: Object.fromEntries(
-            Object.entries(preset.options || {}).filter(([key]) => {
-              const optionMeta = presetMeta?.OPTIONS?.find(
-                (opt) => opt.id === key
-              );
-              return optionMeta?.type !== 'password';
-            })
-          ),
+          options: redactPresetOptions(preset.options, presetMeta?.OPTIONS),
         };
       }),
     };
