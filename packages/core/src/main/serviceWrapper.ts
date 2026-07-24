@@ -431,12 +431,7 @@ async function buildDebridStreams(
             private: result.private,
             sources: result.sources,
             index: result.file.index,
-            fileIndex:
-              original?.torrent?.fileIdx !== undefined &&
-              !metadata?.season &&
-              !metadata?.episode
-                ? original.torrent.fileIdx
-                : undefined,
+            fileIndex: metadata ? undefined : original?.torrent?.fileIdx,
             cacheAndPlay:
               userData.cacheAndPlay?.enabled &&
               userData.cacheAndPlay?.streamTypes?.includes('torrent'),
